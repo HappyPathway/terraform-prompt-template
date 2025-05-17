@@ -14,6 +14,7 @@ data "external" "gemini_content" {
     create_with_placeholders = tostring(var.create_with_placeholders)
     template_instruction    = jsonencode(var.template_instruction)
     github_api_url          = var.github_api_url
+    template_model          = var.gemini_model
   }
 }
 

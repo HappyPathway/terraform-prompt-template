@@ -47,9 +47,6 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Constants
-GEMINI_MODEL = "gemini-1.5-pro-latest"  # Use the latest pro model
-
 # Define Pydantic models for structured output
 class ReadmeContent(BaseModel):
     """Model for README.md content"""
@@ -75,12 +72,61 @@ class ProjectInfo(BaseModel):
     repo_org: str = Field(description="GitHub organization or username") 
     project_prompt: str = Field(description="Original project description")
 
+# Helper function to get available models and select the best one
+def get_available_model(requested_model: str = 'gemini-1.5-pro'):
+    """Get an available model based on the requested one or fall back to a suitable default."""
+    
+    # Clean up model name (remove any google-gla: prefix)
+    if requested_model.startswith('google-gla:'):
+        requested_model = requested_model.split(':', 1)[1]
+    
+    # Remove any 'models/' prefix
+    if requested_model.startswith('models/'):
+        requested_model = requested_model[7:]
+    
+    # Try the requested model directly
+    try:
+        logger.info(f"Trying requested model: {requested_model}")
+        model = genai.GenerativeModel(requested_model)
+        response = model.generate_content("Test")
+        logger.info(f"Successfully using requested model: {requested_model}")
+        return requested_model
+    except Exception as e:
+        logger.warning(f"Requested model {requested_model} not available: {str(e)}")
+    
+    # Try modern models by priority
+    candidate_models = [
+        "gemini-1.5-pro",
+        "gemini-1.5-flash",
+        "gemini-1.0-pro",
+        "gemini-pro"
+    ]
+    
+    for candidate in candidate_models:
+        try:
+            logger.info(f"Trying candidate model: {candidate}")
+            model = genai.GenerativeModel(candidate)
+            response = model.generate_content("Test")
+            logger.info(f"Successfully found working model: {candidate}")
+            return candidate
+        except Exception as e:
+            logger.warning(f"Candidate model {candidate} failed: {str(e)}")
+            continue
+    
+    # Use legacy model name as last resort
+    logger.warning("All model attempts failed, using legacy gemini-pro as final attempt")
+    return "gemini-pro"
+
 # Gemini agent implementation
-def create_gemini_agent():
+def create_gemini_agent(model: str = 'gemini-1.5-pro-latest'):
     """Create a Gemini agent for project content generation"""
+    # Get a working model
+    working_model = get_available_model(model)
+    logger.info(f"Creating agent with model: {working_model}")
+    
     # Define the agent with Gemini model and structured output type
     content_agent = Agent(
-        'google-gla:gemini-1.5-pro-latest',
+        model=working_model,
         deps_type=ProjectInfo,
         output_type=ProjectOutput,
         system_prompt=(
@@ -113,10 +159,22 @@ def create_gemini_agent():
     return content_agent
 
 # Define template fetch and processing agent
-def create_template_agent():
+def create_template_agent(model: str = 'gemini-1.5-flash-latest'):
     """Create a Gemini agent for template processing"""
+    # Get a working model
+    working_model = get_available_model(model)
+    logger.info(f"Creating template agent with model: {working_model}")
+    
+    # Create model settings with increased token limit
+    model_settings = GeminiModelSettings(
+        temperature=0.2,
+        top_p=0.95,
+        top_k=40,
+        max_output_tokens=16384,  # Increased token limit for more detailed template processing
+    )
+    
     template_agent = Agent(
-        'google-gla:gemini-1.5-flash-latest',  # Use a faster model for template processing
+        model=working_model,  # Use a faster model for template processing
         deps_type=dict,  # Use dictionary for template context
         output_type=dict, # Return processed template
         system_prompt=(
@@ -282,7 +340,7 @@ def create_template_with_placeholders(content: str, placeholder_format: str, pla
     return template_content
 
 
-def generate_content(project_prompt: str, repo_org: str, project_name: str, 
+def generate_content(project_prompt: str, repo_org: str, project_name: str, model: str,
                     create_with_placeholders: bool = False,
                     placeholder_format: str = "${%s}",
                     placeholder_vars: List[str] = None) -> Dict[str, Any]:
@@ -312,20 +370,20 @@ def generate_content(project_prompt: str, repo_org: str, project_name: str,
         )
         
         # Create and configure the agent
-        content_agent = create_gemini_agent()
+        content_agent = create_gemini_agent(model)
         
         # Adjust model settings for more comprehensive output
         model_settings = GeminiModelSettings(
             temperature=0.2,  # Low temperature for more predictable output
             top_p=0.95,       # High top_p for diverse but relevant responses
             top_k=40,         # Standard top_k value
-            max_output_tokens=8192,  # Allow longer outputs for comprehensive documentation
+            max_output_tokens=16384,  # Increased token limit for more detailed documentation
         )
         
         # Run the agent with the project info
         logger.info(f"Generating content for project '{project_name}'...")
         result = content_agent.run_sync(
-            prompt="Generate comprehensive documentation and project setup guidance",
+            "Generate comprehensive documentation and project setup guidance",
             deps=project_info,
             model_settings=model_settings
         )
@@ -381,6 +439,14 @@ def main():
         project_prompt = input_data.get('project_prompt')
         repo_org = input_data.get('repo_org')
         project_name = input_data.get('project_name')
+        gemini_model = input_data.get('gemini_model', 'gemini-1.5-pro-latest')  # Get model name from input
+        
+        # Clean model name if needed
+        if gemini_model and isinstance(gemini_model, str) and gemini_model.startswith('google-gla:'):
+            gemini_model = gemini_model.split(':', 1)[1]
+            
+        # Log the model being used
+        logger.info(f"Using Gemini model: {gemini_model}")
         
         # Check for required parameters
         if not all([project_prompt, repo_org, project_name]):
@@ -450,15 +516,15 @@ def main():
                     }
                     
                     # Create and run template agent
-                    template_agent = create_template_agent()
+                    template_agent = create_template_agent(input_data.get('template_model', 'gemini-1.5-flash-latest'))
                     template_result = template_agent.run_sync(
-                        prompt=f"Analyze and process template for {project_name}",
+                        f"Analyze and process template for {project_name}",
                         deps=template_context
                     )
                     
                     # Get template analysis
                     analysis = template_agent.run_sync(
-                        prompt="Analyze the template structure",
+                        "Analyze the template structure",
                         deps=template_context,
                         tool_choice="analyze_template",
                         tool_params={"template_content": template_content}
@@ -497,6 +563,7 @@ def main():
                     project_prompt=project_prompt,
                     repo_org=repo_org,
                     project_name=project_name,
+                    model=input_data.get('template_model', 'gemini-1.5-flash-latest'),
                     create_with_placeholders=create_with_placeholders,
                     placeholder_format=placeholder_format,
                     placeholder_vars=placeholder_vars
@@ -507,6 +574,7 @@ def main():
                 project_prompt=project_prompt,
                 repo_org=repo_org,
                 project_name=project_name,
+                model=gemini_model,  # Use the main model parameter from the module
                 create_with_placeholders=create_with_placeholders,
                 placeholder_format=placeholder_format,
                 placeholder_vars=placeholder_vars

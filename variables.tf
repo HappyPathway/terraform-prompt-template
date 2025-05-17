@@ -40,3 +40,9 @@ variable "github_api_url" {
   type        = string
   default     = "https://api.github.com"
 }
+
+variable gemini_model {
+  description = "The model to use for the Gemini API"
+  type        = string
+  default     = "gemini-2.0-pro"  # Default model
+}

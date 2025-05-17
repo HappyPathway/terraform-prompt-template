@@ -28,6 +28,7 @@ module "template_generator_example" {
   # Required inputs
   project_prompt  = "Create a web application for customer relationship management with a React frontend and Node.js backend"
   project_name    = "crm-webapp" 
+  gemini_model    = "google-gla:gemini-2.0-pro"  # Default model
   repo_org        = "HappyPathway"
   gemini_api_key  = var.gemini_api_key
   create_with_placeholders = true
