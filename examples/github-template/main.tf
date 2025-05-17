@@ -5,19 +5,6 @@
  * to fetch an existing template from GitHub and process it.
  */
 
-variable "gemini_api_key" {
-  description = "API key for Gemini API"
-  type        = string
-  sensitive   = true
-}
-
-variable "github_token" {
-  description = "GitHub personal access token for API authentication"
-  type        = string
-  sensitive   = true
-  default     = ""  # Optional, as public repos don't require authentication
-}
-
 # The GitHub token should be set as an environment variable before running Terraform
 # In a shell: export GITHUB_TOKEN=your_token_here
 # This is more reliable than using local-exec which only affects the current command
@@ -38,10 +25,23 @@ module "template_generator_example" {
     generate_example      = true
   }
   github_api_url   = "https://api.github.com"  # Optional, default is GitHub API
+  
+  # GitHub push configuration
+  push_to_github  = true
+  github_token    = var.github_token
+  target_repo     = var.target_repo
+  target_path     = var.target_path
+  target_branch   = var.target_branch
 }
 
 # Output the results
 output "template_generator_example" {
   description = "All generated repositories"
   value       = module.template_generator_example
+}
+
+# Create a local file with the generated template for reference
+resource "local_file" "generated_template" {
+  content  = module.template_generator_example.generated_template
+  filename = "${path.module}/generated_template.json"
 }

@@ -46,3 +46,35 @@ variable gemini_model {
   type        = string
   default     = "gemini-2.0-pro"  # Default model
 }
+
+# GitHub push configuration variables
+variable "github_token" {
+  description = "GitHub personal access token for API authentication"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "push_to_github" {
+  description = "Whether to push the generated template to a GitHub repository"
+  type        = bool
+  default     = false
+}
+
+variable "target_repo" {
+  description = "Target repository for writing the template"
+  type        = string
+  default     = "HappyPathway/PromptTemplates"
+}
+
+variable "target_path" {
+  description = "Path in the repo where to save the template"
+  type        = string
+  default     = "template.json"
+}
+
+variable "target_branch" {
+  description = "Branch to write to in the target repo"
+  type        = string
+  default     = "main"
+}

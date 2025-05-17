@@ -28,6 +28,13 @@ module "fastapi_template_generator" {
     generate_example      = true
   }
   github_api_url   = "https://api.github.com"  # Optional, default is GitHub API
+  
+  # GitHub push configuration
+  push_to_github  = true
+  github_token    = var.github_token
+  target_repo     = var.target_repo
+  target_path     = "fastapi-template.json"
+  target_branch   = var.target_branch
 }
 
 # Output the results

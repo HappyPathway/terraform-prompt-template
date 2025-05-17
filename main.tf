@@ -31,4 +31,38 @@ locals {
   
   # Extract any error message for output
   error_message = local.has_error ? data.external.gemini_content.result.error : null
+  
+  # Local file path for the template
+  template_file_path = "${path.module}/generated_template.json"
+}
+
+# Create a local file with the generated template for debugging (always created)
+resource "local_file" "generated_template" {
+  content  = local.generated_template
+  filename = local.template_file_path
+}
+
+# Parse the target_repo into owner and repository name
+locals {
+  repo_parts = var.push_to_github && var.target_repo != "" ? split("/", var.target_repo) : ["", ""]
+  owner      = length(local.repo_parts) == 2 ? local.repo_parts[0] : ""
+  repository = length(local.repo_parts) == 2 ? local.repo_parts[1] : ""
+}
+
+# Push the template to the specified GitHub repository using the GitHub provider
+provider "github" {
+  token = var.push_to_github ? var.github_token : null
+  owner = local.owner
+}
+
+resource "github_repository_file" "template_file" {
+  count               = var.push_to_github ? 1 : 0
+  repository          = local.repository
+  branch              = var.target_branch
+  file                = var.target_path
+  content             = local.generated_template
+  commit_message      = "Update generated template for ${local.project_type} project"
+  commit_author       = "Terraform Template Generator"
+  commit_email        = "terraform@example.com"
+  overwrite_on_create = true
 }
