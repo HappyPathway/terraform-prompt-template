@@ -15,7 +15,7 @@ variable "github_token" {
 variable "target_repo" {
   description = "Target repository for writing the template"
   type        = string
-  default     = "HappyPathway/PromptTemplates"
+  default     = "PromptTemplates"
 }
 
 variable "target_branch" {

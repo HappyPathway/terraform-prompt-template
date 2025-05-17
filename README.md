@@ -11,6 +11,24 @@ This module provides an interface between Terraform and Google's Gemini API for 
 - Convert concrete values to placeholders for reusable templates
 - Support for GitHub Enterprise through configurable API URLs
 - Structured output format with error handling
+- Google Search grounding for more accurate and current results (with Gemini 2.0+ models)
+- Push generated templates to GitHub repositories
+
+## Supported Models
+
+As of May 2025, the following Gemini models are supported:
+
+| Model | Description | Best For |
+|-------|-------------|----------|
+| `gemini-2.5-pro-preview-05-06` | Latest 2.5 Pro preview (default) | Complex reasoning, advanced thinking |
+| `gemini-2.5-flash-preview-04-17` | Latest 2.5 Flash preview | Efficient, adaptive thinking |
+| `gemini-2.0-pro` | Latest stable 2.0 Pro | Complex reasoning tasks |
+| `gemini-2.0-flash` | Latest stable 2.0 Flash | Speed and next-gen features |
+| `gemini-2.0-flash-lite` | Lightweight 2.0 | Cost efficiency |
+| `gemini-1.5-pro` | Stable 1.5 Pro | Complex reasoning fallback |
+| `gemini-1.5-flash` | Stable 1.5 Flash | Fast and versatile fallback |
+
+Search grounding is automatically enabled for Gemini 2.0+ models to provide the most current and accurate information.
 
 ## Usage
 
@@ -23,6 +41,9 @@ module "template_generator" {
   project_name   = "cloud-manager"
   repo_org       = "my-organization"
   gemini_api_key = var.gemini_api_key  # Always use a variable for sensitive values
+  
+  # Optional: choose a specific model
+  gemini_model   = "gemini-2.5-pro-preview-05-06"  # Default
 
   # Optional: template formatting settings
   create_with_placeholders = true
@@ -34,12 +55,42 @@ module "template_generator" {
   
   # Optional: GitHub API URL for Enterprise environments
   github_api_url = "https://github.example.com/api/v3"
+  
+  # Optional: Push to GitHub configuration
+  push_to_github = true
+  github_token   = var.github_token
+  target_repo    = "my-org/my-templates"
+  target_path    = "templates/my-project-template.json"
+  target_branch  = "main"
 }
 
 # Access generated template content
 locals {
   template_content = module.template_generator.generated_template
   project_type     = module.template_generator.project_type
+}
+
+## Google Search Grounding
+
+Gemini 2.0+ models automatically use Google Search to ground responses in current facts from the web, ensuring that generated templates include:
+
+- Up-to-date library and framework versions
+- Current best practices and design patterns
+- Latest documentation references and resources
+- More factually accurate technical information
+
+Search grounding is automatically enabled when using any Gemini 2.0 or 2.5 model. The module will:
+
+1. Detect if the selected model supports search grounding
+2. Automatically configure the appropriate search tools
+3. Include search query information and sources in the output for verification
+4. Expose search grounding usage via the `used_search_grounding` output variable
+
+You can check if search grounding was used in your template generation:
+
+```hcl
+output "used_search_grounding" {
+  value = module.template_generator.used_search_grounding
 }
 ```
 
@@ -80,9 +131,15 @@ The module requires the GEMINI_API_KEY to be available. If using GitHub template
 | project_name | The name of the project/repository | `string` | n/a | yes |
 | repo_org | The GitHub organization name | `string` | n/a | yes |
 | gemini_api_key | The Gemini API key | `string` | n/a | yes |
+| gemini_model | The Gemini model to use for generation | `string` | `"gemini-2.5-pro-preview-05-06"` | no |
 | create_with_placeholders | Whether to create templates with placeholders | `bool` | `false` | no |
 | template_instruction | Instructions for template formatting | `object` | `{}` | no |
 | github_api_url | GitHub API URL for Enterprise support | `string` | `"https://api.github.com"` | no |
+| push_to_github | Whether to push generated templates to GitHub | `bool` | `false` | no |
+| github_token | GitHub token for authentication | `string` | `""` | no |
+| target_repo | Target repository for pushing templates | `string` | `""` | no |
+| target_path | Target path in the repository | `string` | `""` | no |
+| target_branch | Target branch in the repository | `string` | `"main"` | no |
 
 ## Outputs
 
@@ -92,3 +149,5 @@ The module requires the GEMINI_API_KEY to be available. If using GitHub template
 | project_type | The detected project type |
 | programming_language | The detected programming language |
 | error_message | Error message, if any |
+| stack_trace | Full Python stack trace for debugging when errors occur |
+| used_search_grounding | Indicates if Google Search grounding was used |

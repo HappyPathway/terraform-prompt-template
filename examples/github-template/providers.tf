@@ -1,2 +1,4 @@
-# Provider configuration is handled by the module itself
-# This file is kept for documentation purposes
+provider github {
+    token = var.github_token
+    owner = "HappyPathway"
+}

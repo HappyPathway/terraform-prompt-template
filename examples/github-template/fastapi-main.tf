@@ -18,7 +18,7 @@ module "fastapi_template_generator" {
   # Required inputs
   project_prompt  = file("${path.module}/fastapi-project-plan.md")
   project_name    = "fastapi-ecommerce-api" 
-  gemini_model    = "google-gla:gemini-1.5-pro"  # Using 1.5 Pro as it's more reliable
+  gemini_model    = "google-gla:gemini-2.5-pro-preview-05-06"  # Using latest 2.5 Pro for enhanced reasoning
   repo_org        = "HappyPathway"
   gemini_api_key  = var.gemini_api_key
   create_with_placeholders = true
@@ -30,11 +30,12 @@ module "fastapi_template_generator" {
   github_api_url   = "https://api.github.com"  # Optional, default is GitHub API
   
   # GitHub push configuration
-  push_to_github  = true
+  push_to_github  = false
   github_token    = var.github_token
   target_repo     = var.target_repo
   target_path     = "fastapi-template.json"
   target_branch   = var.target_branch
+  template_dir = "${path.root}/templates"
 }
 
 # Output the results

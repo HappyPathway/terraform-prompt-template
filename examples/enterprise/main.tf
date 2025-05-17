@@ -34,47 +34,31 @@ module "enterprise_template_example" {
   project_prompt  = "Create a microservice architecture for an e-commerce application with service discovery, API gateway, and event-driven design"
   project_name    = "ecommerce-platform" 
   repo_org        = "my-enterprise"
+  gemini_model    = "google-gla:gemini-2.5-pro-preview-05-06"  # Using latest 2.5 Pro model
   gemini_api_key  = var.gemini_api_key
   
   # GitHub Enterprise configuration
   github_api_url  = var.github_enterprise_url
   
-  # Generate content with Gemini
-  generate_prompts = true
-  
-  # Template saving settings
-  save_generated_template = true
-  template_save_repo      = "my-enterprise/templates"
-  template_save_path      = "microservices/ecommerce-template.json"
-  template_save_branch    = "main"
-  template_commit_author  = "Template Generator"
-  template_commit_email   = "template-generator@example.com"
-  
-  # Other required settings for the root module to work
-  base_repository = {
-    name        = "ecommerce-platform" 
-    description = "Microservice architecture for e-commerce application"
-    visibility  = "private"
+  # Template formatting settings
+  create_with_placeholders = true
+  template_instruction = {
+    placeholder_format    = "{{%s}}"
+    placeholder_variables = ["project_name", "repo_org", "project_type", "programming_language"]
+    generate_example      = true
   }
   
-  repositories = [
-    {
-      name        = "ecommerce-api-gateway"
-      description = "API Gateway service for the e-commerce platform"
-    },
-    {
-      name        = "ecommerce-product-service" 
-      description = "Product management microservice"
-    },
-    {
-      name        = "ecommerce-order-service"
-      description = "Order processing microservice"
-    }
-  ]
+  # GitHub push configuration
+  push_to_github  = true
+  github_token    = var.github_token
+  target_repo     = "my-enterprise/templates"
+  target_path     = "microservices/ecommerce-template.json"
+  target_branch   = "main"
+  template_dir    = "${path.root}/templates"
 }
 
 # Output the results
-output "all_repos" {
-  description = "All generated repositories"
-  value       = module.enterprise_template_example.all_repos
+output "enterprise_template_example" {
+  description = "Generated enterprise template"
+  value       = module.enterprise_template_example
 }

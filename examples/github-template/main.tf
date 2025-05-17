@@ -15,10 +15,11 @@ module "template_generator_example" {
   # Required inputs
   project_prompt  = "Create a web application for customer relationship management with a React frontend and Node.js backend"
   project_name    = "crm-webapp" 
-  gemini_model    = "google-gla:gemini-2.0-pro"  # Default model
+  gemini_model    = "google-gla:gemini-2.5-pro-preview-05-06"  # Using latest 2.5 Pro model
   repo_org        = "HappyPathway"
   gemini_api_key  = var.gemini_api_key
   create_with_placeholders = true
+  template_dir = "${path.root}/templates"
   template_instruction = {
     placeholder_format    = "{{%s}}"
     placeholder_variables = ["project_name", "repo_org", "project_type", "programming_language"]
@@ -27,7 +28,7 @@ module "template_generator_example" {
   github_api_url   = "https://api.github.com"  # Optional, default is GitHub API
   
   # GitHub push configuration
-  push_to_github  = true
+  push_to_github  = false
   github_token    = var.github_token
   target_repo     = var.target_repo
   target_path     = var.target_path

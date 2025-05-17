@@ -15,25 +15,31 @@ data "external" "gemini_content" {
     template_instruction    = jsonencode(var.template_instruction)
     github_api_url          = var.github_api_url
     template_model          = var.gemini_model
+    gemini_model            = var.gemini_model  # Explicitly pass the gemini_model parameter
   }
 }
 
 locals {
   # Handle potential errors in the response
   has_error = contains(keys(data.external.gemini_content.result), "error")
+  has_stack_trace = contains(keys(data.external.gemini_content.result), "stack_trace")
 
   # Parse the responses
-  generated_template = local.has_error ? "{\"error\": \"${data.external.gemini_content.result.error}\"}" : data.external.gemini_content.result.main
+  generated_template = local.has_error ? jsonencode({
+    "error": data.external.gemini_content.result.error,
+    "stack_trace": local.has_stack_trace ? data.external.gemini_content.result.stack_trace : null
+  }) : data.external.gemini_content.result.main
   
   # Extract project type and language from response
   project_type = try(data.external.gemini_content.result.project_type, "Unknown")
   programming_language = try(data.external.gemini_content.result.programming_language, "Unknown")
   
-  # Extract any error message for output
+  # Extract any error message and stack trace for output
   error_message = local.has_error ? data.external.gemini_content.result.error : null
+  stack_trace = local.has_stack_trace ? data.external.gemini_content.result.stack_trace : null
   
   # Local file path for the template
-  template_file_path = "${path.module}/generated_template.json"
+  template_file_path = "${var.template_dir}/${var.project_type}-template.json"
 }
 
 # Create a local file with the generated template for debugging (always created)
@@ -50,14 +56,9 @@ locals {
 }
 
 # Push the template to the specified GitHub repository using the GitHub provider
-provider "github" {
-  token = var.push_to_github ? var.github_token : null
-  owner = local.owner
-}
-
 resource "github_repository_file" "template_file" {
   count               = var.push_to_github ? 1 : 0
-  repository          = local.repository
+  repository          = var.target_repo
   branch              = var.target_branch
   file                = var.target_path
   content             = local.generated_template

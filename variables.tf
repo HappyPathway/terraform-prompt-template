@@ -44,7 +44,7 @@ variable "github_api_url" {
 variable gemini_model {
   description = "The model to use for the Gemini API"
   type        = string
-  default     = "gemini-2.0-pro"  # Default model
+  default     = "gemini-2.5-pro-preview-05-06"  # Default to latest 2.5 Pro preview as of May 2025
 }
 
 # GitHub push configuration variables
@@ -77,4 +77,16 @@ variable "target_branch" {
   description = "Branch to write to in the target repo"
   type        = string
   default     = "main"
+}
+
+variable project_type {
+  description = "The type of project (e.g., web, mobile, etc.)"
+  type        = string
+  default     = "web"
+}
+
+variable template_dir {
+  description = "Directory to store the generated template files"
+  type        = string
+  default     = ""
 }
