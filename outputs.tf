@@ -1,6 +1,11 @@
-output "generated_template" {
-  description = "The generated template content"
-  value       = local.generated_template
+output "generated_template_json" {
+  description = "The generated template content in JSON format"
+  value       = data.local_file.generated_json.content
+}
+
+output "generated_template_markdown" {
+  description = "The generated template content in Markdown format"
+  value       = data.local_file.generated_markdown.content
 }
 
 output "project_type" {
@@ -25,5 +30,5 @@ output "stack_trace" {
 
 output "used_search_grounding" {
   description = "Whether search grounding was used for this generation"
-  value       = try(data.external.gemini_content.result.used_search_grounding, false)
+  value       = try(local.parsed_json.used_search_grounding, false)
 }

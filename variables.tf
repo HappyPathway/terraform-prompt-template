@@ -22,7 +22,7 @@ variable "gemini_api_key" {
 variable "create_with_placeholders" {
   description = "Whether to create templates with placeholders instead of actual values"
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "template_instruction" {
@@ -35,6 +35,12 @@ variable "template_instruction" {
   default = {}
 }
 
+variable "enable_search_grounding" {
+  description = "Whether to enable Google Search grounding for Gemini 2.x+ models"
+  type        = bool
+  default     = true
+}
+
 variable "github_api_url" {
   description = "GitHub API URL for template fetching (for GitHub Enterprise support)"
   type        = string
@@ -45,6 +51,30 @@ variable gemini_model {
   description = "The model to use for the Gemini API"
   type        = string
   default     = "gemini-2.5-pro-preview-05-06"  # Default to latest 2.5 Pro preview as of May 2025
+}
+
+variable "model_settings" {
+  description = "Configuration settings for the Gemini model"
+  type = object({
+    temperature        = optional(number, 0.2)
+    top_p              = optional(number, 0.95)
+    top_k              = optional(number, 40)
+    max_output_tokens  = optional(number, 8192)
+    candidate_count    = optional(number, 1)
+  })
+  default = {}
+}
+
+variable "disable_cache" {
+  description = "Set to true to bypass the cache and force content generation"
+  type        = bool
+  default     = false
+}
+
+variable "cache_version" {
+  description = "Version identifier for the cache, changing this invalidates existing cache"
+  type        = string
+  default     = "v1"
 }
 
 # GitHub push configuration variables

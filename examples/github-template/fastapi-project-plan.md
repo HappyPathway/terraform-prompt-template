@@ -1,6 +1,9 @@
 # FastAPI E-commerce API
 
 Build a modern e-commerce backend API using Python FastAPI framework with PostgreSQL, Docker, and best security practices.
+## Required Libraries
+Pydantic
+Pydantic-AI
 
 ## Tech Stack
 - **Language & Framework**: Python 3.11+, FastAPI

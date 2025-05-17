@@ -15,10 +15,12 @@ module "template_generator_example" {
   # Required inputs
   project_prompt  = "Create a web application for customer relationship management with a React frontend and Node.js backend"
   project_name    = "crm-webapp" 
+  project_type    = "react-webapp"  # Specify the project type
   gemini_model    = "google-gla:gemini-2.5-pro-preview-05-06"  # Using latest 2.5 Pro model
   repo_org        = "HappyPathway"
   gemini_api_key  = var.gemini_api_key
   create_with_placeholders = true
+  enable_search_grounding = false  # Disable search grounding for this example
   template_dir = "${path.root}/templates"
   template_instruction = {
     placeholder_format    = "{{%s}}"
@@ -36,13 +38,12 @@ module "template_generator_example" {
 }
 
 # Output the results
-output "template_generator_example" {
+output "template_generator" {
   description = "All generated repositories"
-  value       = module.template_generator_example
+  value       = module.template_generator_example.generated_template_markdown
 }
 
-# Create a local file with the generated template for reference
-resource "local_file" "generated_template" {
-  content  = module.template_generator_example.generated_template
-  filename = "${path.module}/generated_template.json"
+resource local_file "generated_template" {
+  filename = "${path.root}/templates/react-webapp.md"
+  content  = module.template_generator_example.generated_template_markdown
 }

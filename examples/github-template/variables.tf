@@ -27,6 +27,6 @@ variable "target_branch" {
 variable "target_path" {
   description = "Path in the repo where to save the template"
   type        = string
-  default     = "crm-template.json"
+  default     = "crm-template"
 }
 

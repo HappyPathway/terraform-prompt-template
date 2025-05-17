@@ -50,8 +50,10 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Constants for feature flags
-ENABLE_SEARCH_GROUNDING = True  # Set to False to disable Google Search grounding
+# Constants for feature flags - can be overridden by environment variables or input parameters
+ENABLE_SEARCH_GROUNDING = os.environ.get("ENABLE_SEARCH_GROUNDING", "true").lower() in ["true", "yes", "1"]
+GOOGLE_SEARCH_API_KEY = os.environ.get("GOOGLE_SEARCH_API_KEY", "")
+SEARCH_ENGINE_ID = os.environ.get("SEARCH_ENGINE_ID", "")
 
 # Define Pydantic models for structured output
 class ReadmeContent(BaseModel):
@@ -134,22 +136,49 @@ def get_available_model(requested_model: str = 'gemini-1.5-pro'):
     return "gemini-pro"
 
 # Gemini agent implementation
-def create_gemini_agent(model: str = 'gemini-1.5-pro-latest'):
+def create_gemini_agent(model: str = 'gemini-1.5-pro-latest', token_config=None):
     """Create a Gemini agent for project content generation"""
     # Get a working model
     working_model = get_available_model(model)
     logger.info(f"Creating agent with model: {working_model}")
     
-    # Configure Google Search as a tool if using Gemini 2.0+ models
+    # Use provided token configuration or defaults
+    if token_config is None:
+        token_config = {
+            "temperature": 0.2,
+            "top_p": 0.95,
+            "top_k": 40,
+            "max_output_tokens": 16384,
+            "candidate_count": 1
+        }
+    
+    # Configure Google Search as a tool if using Gemini 2.0+ models and it's enabled
     # Note: These are model tools for Gemini API, not agent tools for pydantic-ai
     model_tools = []  # For the Gemini model itself, not for the Agent constructor
-    if ENABLE_SEARCH_GROUNDING and '2.' in working_model:  # Check if we're using Gemini 2.x models
+    
+    # Check if search grounding should be enabled based on:
+    # 1. Global flag
+    # 2. Compatible model version (Gemini 2.x)
+    # 3. Necessary API credentials available
+    should_use_search = (
+        ENABLE_SEARCH_GROUNDING and 
+        '2.' in working_model and
+        (GOOGLE_SEARCH_API_KEY or os.environ.get("GOOGLE_API_KEY", ""))
+    )
+    
+    if should_use_search:
         try:
             logger.info("Setting up Google Search grounding for Gemini 2.0+ model")
-            google_search_tool = Tool(google_search=GoogleSearch())
+            # Properly create the Tool object for Gemini API
+            google_search_tool = Tool(function_declarations=[{
+                "name": "google_search", 
+                "description": "Search Google for current information"
+            }])
             model_tools = [google_search_tool]
+            logger.info("Google Search grounding enabled successfully")
         except Exception as e:
             logger.warning(f"Failed to set up Google Search grounding: {str(e)}")
+            logger.warning("Continuing without search grounding")
     
     # Define the agent with Gemini model and structured output type
     agent_kwargs = {
@@ -165,13 +194,13 @@ def create_gemini_agent(model: str = 'gemini-1.5-pro-latest'):
         )
     }
     
-    # Create model settings with the tools we want to use
+    # Create model settings with the tools we want to use and the configurable token settings
     try:
         model_settings = GeminiModelSettings(
-            temperature=0.2,
-            top_p=0.95,
-            top_k=40,
-            max_output_tokens=16384
+            temperature=token_config["temperature"],
+            top_p=token_config["top_p"],
+            top_k=token_config["top_k"],
+            max_output_tokens=token_config["max_output_tokens"]
         )
         
         # Add tools to model_settings (not to Agent constructor)
@@ -213,28 +242,50 @@ def create_gemini_agent(model: str = 'gemini-1.5-pro-latest'):
     return content_agent
 
 # Define template fetch and processing agent
-def create_template_agent(model: str = 'gemini-1.5-flash-latest'):
+def create_template_agent(model: str = 'gemini-1.5-flash-latest', token_config=None):
     """Create a Gemini agent for template processing"""
     # Get a working model
     working_model = get_available_model(model)
     logger.info(f"Creating template agent with model: {working_model}")
     
-    # Create model settings with increased token limit
+    # Use provided token configuration or defaults
+    if token_config is None:
+        token_config = {
+            "temperature": 0.2,
+            "top_p": 0.95, 
+            "top_k": 40,
+            "max_output_tokens": 16384,
+            "candidate_count": 1
+        }
+    
+    # Create model settings with configurable token settings
     try:
         model_settings = GeminiModelSettings(
-            temperature=0.2,
-            top_p=0.95,
-            top_k=40,
-            max_output_tokens=16384,  # Increased token limit for more detailed template processing
+            temperature=token_config["temperature"],
+            top_p=token_config["top_p"],
+            top_k=token_config["top_k"],
+            max_output_tokens=token_config["max_output_tokens"]  # Configurable token limit for template processing
         )
         
         # Configure Google Search as a tool if using Gemini 2.0+ models
         # Note: These are model tools for Gemini API, not agent tools for pydantic-ai
         model_tools = []  # For the Gemini model itself, not for the Agent constructor
-        if ENABLE_SEARCH_GROUNDING and '2.' in working_model:  # Check if we're using Gemini 2.x models
+        
+        # Check if search grounding should be enabled for template agent
+        should_use_search = (
+            ENABLE_SEARCH_GROUNDING and 
+            '2.' in working_model and
+            (GOOGLE_SEARCH_API_KEY or os.environ.get("GOOGLE_API_KEY", ""))
+        )
+        
+        if should_use_search:
             try:
                 logger.info("Setting up Google Search grounding for template agent")
-                google_search_tool = Tool(google_search=GoogleSearch())
+                # Properly create the Tool object for Gemini API
+                google_search_tool = Tool(function_declarations=[{
+                    "name": "google_search", 
+                    "description": "Search Google for current information"
+                }])
                 model_tools = [google_search_tool]
                 
                 # Handle different versions of the API
@@ -459,7 +510,8 @@ def create_template_with_placeholders(content: str, placeholder_format: str, pla
 def generate_content(project_prompt: str, repo_org: str, project_name: str, model: str,
                     create_with_placeholders: bool = False,
                     placeholder_format: str = "${%s}",
-                    placeholder_vars: List[str] = None) -> Dict[str, Any]:
+                    placeholder_vars: List[str] = None,
+                    token_config: Dict[str, Any] = None) -> Dict[str, Any]:
     """
     Generate content using Gemini agent based on project prompt.
     
@@ -470,6 +522,7 @@ def generate_content(project_prompt: str, repo_org: str, project_name: str, mode
         create_with_placeholders: Whether to create content with placeholders
         placeholder_format: Format for placeholders
         placeholder_vars: Variables to convert to placeholders
+        token_config: Configuration for token settings (temperature, top_p, etc.)
         
     Returns:
         Dictionary containing generated content
@@ -487,11 +540,21 @@ def generate_content(project_prompt: str, repo_org: str, project_name: str, mode
         
         # Prepare model settings for more comprehensive output
         try:
+            # Use provided token configuration or defaults
+            if token_config is None:
+                token_config = {
+                    "temperature": 0.2,  # Low temperature for more predictable output
+                    "top_p": 0.95,       # High top_p for diverse but relevant responses
+                    "top_k": 40,         # Standard top_k value
+                    "max_output_tokens": 16384,  # Increased token limit for more detailed documentation
+                    "candidate_count": 1
+                }
+                
             model_settings = GeminiModelSettings(
-                temperature=0.2,  # Low temperature for more predictable output
-                top_p=0.95,       # High top_p for diverse but relevant responses
-                top_k=40,         # Standard top_k value
-                max_output_tokens=16384,  # Increased token limit for more detailed documentation
+                temperature=token_config["temperature"],
+                top_p=token_config["top_p"],
+                top_k=token_config["top_k"],
+                max_output_tokens=token_config["max_output_tokens"]
             )
             
             # For Gemini 2.0+ models, add tool configuration for Search Grounding
@@ -514,7 +577,7 @@ def generate_content(project_prompt: str, repo_org: str, project_name: str, mode
             model_settings = None
             
         # Create and configure the agent
-        content_agent = create_gemini_agent(model)
+        content_agent = create_gemini_agent(model, token_config)
         
         # Run the agent with the project info
         logger.info(f"Generating content for project '{project_name}'...")
@@ -610,7 +673,16 @@ def generate_content(project_prompt: str, repo_org: str, project_name: str, mode
                 if hasattr(result.output, field_name):
                     field_value = getattr(result.output, field_name)
                     if field_value is not None:
-                        main_content[field_name] = field_value
+                        # Ensure lists are properly handled
+                        if field_name in ["documentation_source", "best_practices", "suggested_extensions"]:
+                            if isinstance(field_value, list):
+                                # Ensure all items are strings
+                                main_content[field_name] = [str(item) for item in field_value]
+                            else:
+                                # Convert non-list to list of one string
+                                main_content[field_name] = [str(field_value)]
+                        else:
+                            main_content[field_name] = str(field_value)
                     else:
                         main_content[field_name] = "" if field_name == "readme_content" else []
                 else:
@@ -700,17 +772,102 @@ def generate_content(project_prompt: str, repo_org: str, project_name: str, mode
         }
 
 
+def convert_json_to_markdown(json_data):
+    """
+    Convert JSON data to Markdown format
+    
+    Args:
+        json_data: A dictionary containing the generated content
+        
+    Returns:
+        Markdown formatted string
+    """
+    md = []
+    
+    # Add README content
+    readme_content = json_data.get("readme_content", "No content available")
+    md.append(f"{readme_content}\n\n")
+    
+    # Add best practices section
+    md.append("## Best Practices\n")
+    for practice in json_data.get("best_practices", []):
+        md.append(f"- {practice}\n")
+    md.append("\n")
+    
+    # Add suggested extensions section
+    md.append("## Recommended VS Code Extensions\n")
+    for extension in json_data.get("suggested_extensions", []):
+        md.append(f"- {extension}\n")
+    md.append("\n")
+    
+    # Add documentation sources section
+    md.append("## Documentation Sources\n")
+    for doc in json_data.get("documentation_source", []):
+        md.append(f"- {doc}\n")
+    md.append("\n")
+    
+    # Add Copilot instructions if available
+    if json_data.get("copilot_instructions"):
+        md.append("## GitHub Copilot Instructions\n")
+        md.append(f"{json_data.get('copilot_instructions')}\n\n")
+    
+    return "".join(md)
+
 def main():
     """
-    Main function that follows the Terraform external data source protocol:
-    1. Read JSON from stdin
+    Main function that generates content using Gemini API and writes output files:
+    1. Read args from command line
     2. Process the input
-    3. Write JSON result to stdout
+    3. Write JSON and Markdown files to specified output paths
+    
+    This eliminates the need for the external data source pattern and json_to_markdown
+    conversion in Terraform.
     """
     try:
-        # Read input JSON from stdin
-        input_json = sys.stdin.read()
-        input_data = json.loads(input_json)
+        # Parse command line arguments
+        import argparse
+        
+        parser = argparse.ArgumentParser(description='Generate project documentation using Gemini API')
+        parser.add_argument('--project_prompt', required=True, help='Project description')
+        parser.add_argument('--repo_org', required=True, help='GitHub organization name')
+        parser.add_argument('--project_name', required=True, help='Project name')
+        parser.add_argument('--gemini_model', default='gemini-1.5-pro-latest', help='Gemini model to use')
+        parser.add_argument('--json_output', required=True, help='Path for the output JSON file')
+        parser.add_argument('--markdown_output', required=True, help='Path for the output Markdown file')
+        parser.add_argument('--create_with_placeholders', default='false', help='Replace values with placeholders')
+        parser.add_argument('--enable_search_grounding', type=str, default='true', help='Enable search grounding')
+        parser.add_argument('--placeholder_format', default='${%s}', help='Placeholder format string')
+        parser.add_argument('--placeholder_vars', default='project_name,repo_org,project_type,programming_language', 
+                            help='Comma-separated list of placeholder variables')
+        parser.add_argument('--temperature', type=float, default=0.2, help='Model temperature')
+        parser.add_argument('--top_p', type=float, default=0.95, help='Model top_p')
+        parser.add_argument('--top_k', type=int, default=40, help='Model top_k')
+        parser.add_argument('--max_output_tokens', type=int, default=16384, help='Max output tokens')
+        
+        # Parse args
+        args = parser.parse_args()
+        
+        # Ensure output directories exist
+        os.makedirs(os.path.dirname(os.path.abspath(args.json_output)), exist_ok=True)
+        os.makedirs(os.path.dirname(os.path.abspath(args.markdown_output)), exist_ok=True)
+        
+        # Convert create_with_placeholders from string to boolean
+        create_with_placeholders = args.create_with_placeholders.lower() in ["true", "yes", "1", "t"]
+        
+        # Convert args to input data dictionary
+        input_data = {
+            'project_prompt': args.project_prompt,
+            'repo_org': args.repo_org,
+            'project_name': args.project_name,
+            'gemini_model': args.gemini_model,
+            'create_with_placeholders': str(create_with_placeholders).lower(),
+            'enable_search_grounding': args.enable_search_grounding,
+            'placeholder_format': args.placeholder_format,
+            'placeholder_variables': args.placeholder_vars.split(',')
+        }
+        
+        # Simplified: no caching for now
+        logger.info("Caching is disabled in this implementation")
         
         # Extract parameters from input
         project_prompt = input_data.get('project_prompt')
@@ -740,6 +897,16 @@ def main():
         create_with_placeholders_str = input_data.get('create_with_placeholders', "false")
         create_with_placeholders = create_with_placeholders_str.lower() == "true" if isinstance(create_with_placeholders_str, str) else bool(create_with_placeholders_str)
         
+        # Override search grounding from input parameters if provided
+        global ENABLE_SEARCH_GROUNDING
+        enable_search_str = input_data.get('enable_search_grounding', str(ENABLE_SEARCH_GROUNDING).lower())
+        ENABLE_SEARCH_GROUNDING = enable_search_str.lower() == "true" if isinstance(enable_search_str, str) else bool(enable_search_str)
+        
+        if ENABLE_SEARCH_GROUNDING:
+            logger.info("Search grounding is enabled")
+        else:
+            logger.info("Search grounding is disabled")
+        
         # Parse the template_instruction JSON string if it exists
         template_instruction_str = input_data.get('template_instruction', "{}")
         try:
@@ -750,7 +917,38 @@ def main():
         placeholder_format = template_instruction.get('placeholder_format', "${%s}")
         placeholder_vars = template_instruction.get('placeholder_variables', 
                                              ["project_name", "repo_org", "project_type", "programming_language"])
+                                             
+        # Parse the model_settings if provided
+        model_settings_str = input_data.get('model_settings', "{}")
+        try:
+            model_settings_dict = json.loads(model_settings_str) if isinstance(model_settings_str, str) else model_settings_str
+        except json.JSONDecodeError:
+            model_settings_dict = {}
+            
+        # Get token configurations with defaults
+        token_config = {
+            "temperature": float(model_settings_dict.get('temperature', 0.2)),
+            "top_p": float(model_settings_dict.get('top_p', 0.95)),
+            "top_k": int(model_settings_dict.get('top_k', 40)),
+            "max_output_tokens": int(model_settings_dict.get('max_output_tokens', 16384)),
+            "candidate_count": int(model_settings_dict.get('candidate_count', 1))
+        }
         
+        # Log token configurations
+        logger.info(f"Using token configurations: {token_config}")
+        
+        # Configure token settings
+        token_config = {
+            "temperature": args.temperature,
+            "top_p": args.top_p,
+            "top_k": args.top_k,
+            "max_output_tokens": args.max_output_tokens,
+            "candidate_count": 1
+        }
+        
+        # Log token configurations
+        logger.info(f"Using token configurations: {token_config}")
+
         # Check if we should use an existing template from GitHub
         use_existing_template = input_data.get('use_existing_template', False)
         result = {}
@@ -760,14 +958,28 @@ def main():
         if not api_success:
             error_msg = "Failed to establish connection with Gemini API. Check your API key and network connection."
             logger.error(error_msg)
-            print(json.dumps({
-                "error": error_msg,
+            
+            # Write error to output files instead of stdout
+            error_json = {
+                "error_message": error_msg,
                 "stack_trace": traceback.format_exc(),
-                "main": json.dumps({"error": error_msg}),
+                "readme_content": "# Error: Failed to Generate Content\n\nFailed to establish connection with Gemini API. Check your API key and network connection.",
+                "best_practices": [],
+                "suggested_extensions": [],
+                "documentation_source": [],
                 "project_type": "Unknown",
                 "programming_language": "Unknown"
-            }))
-            sys.exit(0)
+            }
+            
+            # Write JSON output
+            with open(args.json_output, 'w') as json_file:
+                json.dump(error_json, json_file, indent=2)
+                
+            # Write Markdown output
+            with open(args.markdown_output, 'w') as md_file:
+                md_file.write(f"# Error: Failed to Generate Content\n\n{error_msg}\n\n")
+                
+            sys.exit(1)
         
         if use_existing_template:
             # Get template fetching details
@@ -805,7 +1017,10 @@ def main():
                     
                     try:
                         # Create and run template agent
-                        template_agent = create_template_agent(input_data.get('template_model', 'gemini-1.5-flash-latest'))
+                        template_agent = create_template_agent(
+                            input_data.get('template_model', 'gemini-1.5-flash-latest'),
+                            token_config  # Pass token configuration
+                        )
                         
                         # Run initial template analysis with error handling
                         try:
@@ -868,7 +1083,15 @@ def main():
                     try:
                         if analysis is not None and hasattr(analysis, 'output'):
                             if analysis.output is not None:
-                                analysis_output = analysis.output
+                                # Convert from Pydantic model to dict if needed
+                                if hasattr(analysis.output, "model_dump"):
+                                    analysis_output = analysis.output.model_dump()
+                                elif hasattr(analysis.output, "dict"):
+                                    analysis_output = analysis.output.dict()
+                                else:
+                                    analysis_output = analysis.output
+                                # Ensure everything is JSON serializable
+                                analysis_output = json.loads(json.dumps(analysis_output, default=str))
                             else:
                                 logger.warning("Analysis output is None")
                         else:
@@ -880,7 +1103,7 @@ def main():
                         "main": template_content,
                         "project_type": project_type,
                         "programming_language": programming_language,
-                        "template_analysis": json.dumps(analysis_output)
+                        "template_analysis": json.dumps(analysis_output, default=str)
                     }
                 else:
                     # Just return the raw template
@@ -903,7 +1126,8 @@ def main():
                         model=input_data.get('template_model', 'gemini-1.5-flash-latest'),
                         create_with_placeholders=create_with_placeholders,
                         placeholder_format=placeholder_format,
-                        placeholder_vars=placeholder_vars
+                        placeholder_vars=placeholder_vars,
+                        token_config=token_config  # Pass token configuration
                     )
                     # Add the original error and stack trace to the result
                     if isinstance(result, dict) and not "error" in result:
@@ -928,31 +1152,105 @@ def main():
                 model=gemini_model,  # Use the main model parameter from the module
                 create_with_placeholders=create_with_placeholders,
                 placeholder_format=placeholder_format,
-                placeholder_vars=placeholder_vars
+                placeholder_vars=placeholder_vars,
+                token_config=token_config  # Pass token configuration
             )
         
-        # Return result as JSON to stdout
-        print(json.dumps(result))
+        # Simplified: no caching for now
+        logger.info("Caching is disabled in this implementation")
+        
+        # Write JSON result to file
+        with open(args.json_output, 'w') as json_file:
+            json.dump(result, json_file, indent=2)
+            logger.info(f"Successfully wrote JSON to {args.json_output}")
+            
+        # Generate and write Markdown content
+        try:
+            # Extract relevant content for Markdown conversion
+            json_for_md = {}
+            if 'main' in result and not isinstance(result['main'], str):
+                json_for_md = result['main']
+            elif 'readme_content' in result:
+                json_for_md = result
+            else:
+                # Try to parse the 'main' field if it's JSON
+                try:
+                    if isinstance(result.get('main'), str):
+                        json_for_md = json.loads(result['main'])
+                    else:
+                        json_for_md = {
+                            "readme_content": "# Generated Content",
+                            "project_type": result.get("project_type", "Unknown"),
+                            "programming_language": result.get("programming_language", "Unknown")
+                        }
+                except:
+                    # Fallback with error information
+                    json_for_md = {
+                        "readme_content": "# Error in Content Generation\n\nUnable to parse content properly.",
+                        "error": result.get("error", "Unknown error")
+                    }
+            
+            # Convert JSON to Markdown and write to file
+            markdown_content = convert_json_to_markdown(json_for_md)
+            with open(args.markdown_output, 'w') as md_file:
+                md_file.write(markdown_content)
+                logger.info(f"Successfully wrote Markdown to {args.markdown_output}")
+                
+        except Exception as md_error:
+            # If Markdown conversion fails, write a simple error markdown
+            error_md = f"# Error Converting to Markdown\n\n{str(md_error)}\n\n## JSON Content\n\n```json\n{json.dumps(result, indent=2)}\n```"
+            try:
+                with open(args.markdown_output, 'w') as md_file:
+                    md_file.write(error_md)
+            except Exception as write_error:
+                logger.error(f"Failed to write error Markdown: {str(write_error)}")
+                
+        logger.info("Content generation completed successfully")
         sys.exit(0)
         
     except json.JSONDecodeError as e:
         stack_trace = traceback.format_exc()
         logger.error(f"JSON decode error: {str(e)}")
         logger.error(f"Stack trace: {stack_trace}")
-        print(json.dumps({
+        
+        # Write error to both JSON and Markdown outputs
+        error_json = {
             "error": f"Invalid JSON input: {str(e)}",
             "stack_trace": stack_trace
-        }))
-        sys.exit(0)  # Exit with 0 to provide error in JSON format for Terraform
+        }
+        
+        try:
+            with open(args.json_output, 'w') as json_file:
+                json.dump(error_json, json_file, indent=2)
+                
+            with open(args.markdown_output, 'w') as md_file:
+                md_file.write(f"# Error: Invalid JSON Input\n\n{str(e)}\n\n## Stack Trace\n\n```\n{stack_trace}\n```")
+        except Exception as write_error:
+            logger.error(f"Failed to write error files: {str(write_error)}")
+            
+        sys.exit(1)
+        
     except Exception as e:
         stack_trace = traceback.format_exc()
         logger.error(f"Unhandled exception: {str(e)}")
         logger.error(f"Stack trace: {stack_trace}")
-        print(json.dumps({
+        
+        # Write error to both JSON and Markdown outputs
+        error_json = {
             "error": str(e),
             "stack_trace": stack_trace
-        }))
-        sys.exit(0)  # Exit with 0 to provide error in JSON format for Terraform
+        }
+        
+        try:
+            with open(args.json_output, 'w') as json_file:
+                json.dump(error_json, json_file, indent=2)
+                
+            with open(args.markdown_output, 'w') as md_file:
+                md_file.write(f"# Error: Unhandled Exception\n\n{str(e)}\n\n## Stack Trace\n\n```\n{stack_trace}\n```")
+        except Exception as write_error:
+            logger.error(f"Failed to write error files: {str(write_error)}")
+            
+        sys.exit(1)
 
 
 if __name__ == "__main__":
