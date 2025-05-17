@@ -2,7 +2,7 @@
 
 ## Overview
 
-This module provides an interface between Terraform and Google's Gemini API for generating project documentation and templates. It leverages the external data source to execute a Python script (`gemini_generator.py`) that uses Gemini's generative AI capabilities through a structured Pydantic AI agent implementation.
+This module provides an interface between Terraform and Google's Gemini API for generating project documentation and templates. It leverages a Python script (`gemini_generator.py`) that uses Gemini's generative AI capabilities through a structured Pydantic AI agent implementation. The module writes both JSON and Markdown outputs directly to files for improved reliability and idempotency.
 
 ## Features
 
@@ -13,6 +13,8 @@ This module provides an interface between Terraform and Google's Gemini API for 
 - Structured output format with error handling
 - Google Search grounding for more accurate and current results (with Gemini 2.0+ models)
 - Push generated templates to GitHub repositories
+- Direct file output in both JSON and Markdown formats
+- Improved reliability and idempotency with local file handling
 
 ## Supported Models
 
@@ -44,6 +46,9 @@ module "template_generator" {
   
   # Optional: choose a specific model
   gemini_model   = "gemini-2.5-pro-preview-05-06"  # Default
+  
+  # Specify output directory for generated files
+  template_dir   = "${path.module}/templates"
 
   # Optional: template formatting settings
   create_with_placeholders = true
@@ -51,6 +56,14 @@ module "template_generator" {
     placeholder_format    = "${%s}"
     placeholder_variables = ["project_name", "repo_org", "project_type", "programming_language"]
     generate_example      = true
+  }
+  
+  # Optional: Configure token parameters
+  model_settings = {
+    temperature       = 0.2
+    top_p             = 0.95
+    top_k             = 40
+    max_output_tokens = 16384
   }
   
   # Optional: GitHub API URL for Enterprise environments
@@ -66,9 +79,90 @@ module "template_generator" {
 
 # Access generated template content
 locals {
-  template_content = module.template_generator.generated_template
-  project_type     = module.template_generator.project_type
+  json_content = module.template_generator.generated_template_json
+  markdown_content = module.template_generator.generated_template_markdown
+  project_type = module.template_generator.project_type
 }
+
+# Create a local copy of the markdown file (optional, as the module already writes files)
+resource "local_file" "template_markdown" {
+  filename = "${path.module}/published/${local.project_type}-template.md"
+  content  = local.markdown_content
+}
+```
+
+### Example from the Repository
+
+```hcl
+module "template_generator_example" {
+  source = "../.."
+  
+  # Required inputs
+  project_prompt  = "Create a web application for customer relationship management with a React frontend and Node.js backend"
+  project_name    = "crm-webapp"
+  project_type    = "react-webapp"
+  repo_org        = "HappyPathway" 
+  gemini_api_key  = var.gemini_api_key
+  gemini_model    = "google-gla:gemini-2.5-pro-preview-05-06"
+  
+  # Output directory
+  template_dir = "${path.root}/templates"
+  
+  # Template configuration
+  create_with_placeholders = true
+  template_instruction = {
+    placeholder_format    = "{{%s}}"
+    placeholder_variables = ["project_name", "repo_org", "project_type", "programming_language"]
+    generate_example      = true
+  }
+  
+  # Disable search grounding for this example
+  enable_search_grounding = false
+}
+
+# Output the results
+output "template_generator" {
+  description = "Generated markdown content"
+  value       = module.template_generator_example.generated_template_markdown
+}
+
+# Save results to a file (optional, as the module already writes files)
+resource local_file "generated_template" {
+  filename = "${path.root}/templates/react-webapp.md"
+  content  = module.template_generator_example.generated_template_markdown
+}
+```
+
+## Running the Example
+
+To run the included example:
+
+1. Navigate to the example directory:
+   ```bash
+   cd examples/github-template
+   ```
+
+2. Set your Gemini API key as an environment variable:
+   ```bash
+   export GEMINI_API_KEY="your_api_key_here"
+   ```
+
+3. Initialize Terraform:
+   ```bash
+   terraform init
+   ```
+
+4. Run Terraform:
+   ```bash
+   terraform apply
+   ```
+
+5. Check the generated files in the `templates` directory:
+   ```bash
+   ls -la templates/
+   ```
+
+The example will generate both JSON and Markdown files with the content created by the Gemini API.
 
 ## Google Search Grounding
 
@@ -94,16 +188,46 @@ output "used_search_grounding" {
 }
 ```
 
+## Architecture Improvements
+
+This module has been refactored from the original implementation to improve reliability and idempotency:
+
+1. **Direct File Output:**
+   - The Python script now writes both JSON and Markdown outputs directly to files
+   - No more reliance on stdout/stdin for data exchange with Terraform
+
+2. **Simplified Architecture:**
+   - Replaced external data source with a more reliable null_resource approach
+   - Eliminated intermediate JSON-to-Markdown conversion step
+   - Single Python script handles all content generation and format conversion
+
+3. **Better Error Handling:**
+   - Robust error handling writes errors to both JSON and Markdown outputs
+   - Includes detailed error messages and stack traces for easier debugging
+   - Exit codes properly indicate success or failure
+
+4. **Improved Idempotency:**
+   - File-based approach ensures consistency across terraform runs
+   - Local file data sources provide consistent interface for Terraform
+   - Clear separation between generation and consumption of output files
+
+5. **Configurable Token Parameters:**
+   - Control temperature, top_p, top_k, and max_output_tokens through Terraform
+   - Customize generation parameters based on project needs
+
+These improvements make the module more maintainable, easier to debug, and more reliable in production environments.
+
 ## Implementation Details
 
-The module uses Terraform's external data source to invoke a Python script that:
+The module uses a `null_resource` with a local-exec provisioner to invoke a Python script that:
 
 1. Configures the Gemini API client with the provided API key
 2. Sets up structured Pydantic models for the expected output format
 3. Creates a Pydantic AI agent with the appropriate system prompts
 4. Processes the project prompt to generate comprehensive documentation
 5. Optionally converts values to placeholders for template reuse
-6. Returns structured JSON output that Terraform can parse
+6. Writes both JSON and Markdown output directly to files
+7. Uses local_file data sources to read the outputs into Terraform
 
 If template fetching from GitHub is requested, the script will:
 1. Call the GitHub API to retrieve the template content
@@ -145,7 +269,8 @@ The module requires the GEMINI_API_KEY to be available. If using GitHub template
 
 | Name | Description |
 |------|-------------|
-| generated_template | The generated template content |
+| generated_template_json | The generated template content in JSON format |
+| generated_template_markdown | The generated template content in Markdown format |
 | project_type | The detected project type |
 | programming_language | The detected programming language |
 | error_message | Error message, if any |
