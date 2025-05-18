@@ -59,22 +59,10 @@ variable "model_settings" {
     temperature        = optional(number, 0.2)
     top_p              = optional(number, 0.95)
     top_k              = optional(number, 40)
-    max_output_tokens  = optional(number, 8192)
+    max_output_tokens  = optional(number, 32768)
     candidate_count    = optional(number, 1)
   })
   default = {}
-}
-
-variable "disable_cache" {
-  description = "Set to true to bypass the cache and force content generation"
-  type        = bool
-  default     = false
-}
-
-variable "cache_version" {
-  description = "Version identifier for the cache, changing this invalidates existing cache"
-  type        = string
-  default     = "v1"
 }
 
 # GitHub push configuration variables
@@ -85,29 +73,12 @@ variable "github_token" {
   default     = ""
 }
 
-variable "push_to_github" {
-  description = "Whether to push the generated template to a GitHub repository"
-  type        = bool
-  default     = false
-}
-
-variable "target_repo" {
-  description = "Target repository for writing the template"
-  type        = string
-  default     = "HappyPathway/PromptTemplates"
-}
-
 variable "target_path" {
   description = "Path in the repo where to save the template"
   type        = string
   default     = "template.json"
 }
 
-variable "target_branch" {
-  description = "Branch to write to in the target repo"
-  type        = string
-  default     = "main"
-}
 
 variable project_type {
   description = "The type of project (e.g., web, mobile, etc.)"
@@ -119,4 +90,10 @@ variable template_dir {
   description = "Directory to store the generated template files"
   type        = string
   default     = ""
+}
+
+variable github_prompts_dir {
+  description = "Directory to store GitHub prompts files (.github/prompts)"
+  type        = string
+  default     = ".github/prompts"
 }

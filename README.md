@@ -188,6 +188,45 @@ output "used_search_grounding" {
 }
 ```
 
+## LLM Interactions
+
+The `gemini_generator.py` script contains several points of interaction with the Gemini Large Language Model:
+
+1. **Model Availability Testing**
+   - In the `get_available_model()` function, the script sends a minimal "Test" prompt to each model candidate
+   - This confirms API connection and model availability before the main content generation
+   - The script tries the requested model first, then falls back to a series of alternatives if needed
+
+2. **Main Content Generation**
+   - Primary LLM interaction occurs through the `content_agent.run_sync()` method in the `generate_content()` function
+   - Inputs:
+     - System prompt defining the agent as a "professional software engineer and technical documentation specialist"
+     - Project context including name, organization, and project description prompt
+     - Configurable parameters like temperature, tokens, etc.
+   - Output is structured according to the `ProjectOutput` Pydantic model, including:
+     - README content
+     - Best practices
+     - Recommended VS Code extensions
+     - Documentation sources
+     - Project type classification
+     - Programming language identification
+
+3. **Template Processing (When Using Existing Templates)**
+   - The `template_agent` uses LLM to analyze and process GitHub templates
+   - The agent can invoke local Python tools for analysis and placeholder replacement
+   - Interactions include identifying variables in templates and making format decisions
+
+4. **Google Search Grounding (For Gemini 2.x+ Models)**
+   - When enabled, the module configures the Gemini model with a Google Search tool
+   - The LLM can autonomously decide to search for current information about:
+     - Framework versions
+     - Best practices
+     - Technical documentation
+     - Development patterns
+   - Search queries and sources are captured in the generation metadata
+
+The entire process is managed through the Pydantic AI Agent framework, which handles the structured conversation with the LLM, ensuring outputs conform to the expected schemas and formats.
+
 ## Architecture Improvements
 
 This module has been refactored from the original implementation to improve reliability and idempotency:

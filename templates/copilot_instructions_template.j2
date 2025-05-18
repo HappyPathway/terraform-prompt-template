@@ -1,0 +1,57 @@
+# GitHub Copilot Instructions for {{ project_name }}
+
+## Project Context
+
+{{ github_project_prompt_content }}
+
+## Best Practices
+{% if best_practices %}
+{% for practice in best_practices %}
+- {{ practice }}
+{% endfor %}
+{% else %}
+No best practices provided.
+{% endif %}
+
+
+## Recommended VS Code Extensions
+{% if recommended_extensions %}
+{% for extension in recommended_extensions %}
+- {{ extension }}
+{% endfor %}
+{% else %}
+No extensions suggested.
+{% endif %}
+
+
+## Documentation Sources
+{% if documentation_sources %}
+{% for source in documentation_sources %}
+- {{ source }}
+{% endfor %}
+{% else %}
+No documentation sources provided.
+{% endif %}
+
+
+## Project-Specific Guidelines
+{% if project_specific_instructions %}
+{% for instruction in project_specific_instructions %}
+- {{ instruction }}
+{% endfor %}
+{% else %}
+- Follow best practices for {{ programming_language }} development.
+- Use standard conventions for {{ project_type }} projects.
+- Implement secure coding practices and proper error handling.
+- Add appropriate documentation and comments.
+{% endif %}
+
+
+## Helpful Context
+{% if helpful_context %}
+{% for context_item in helpful_context %}
+- {{ context_item }}
+{% endfor %}
+{% else %}
+- Consider the overall project architecture and design patterns.
+{% endif %}

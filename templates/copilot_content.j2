@@ -1,0 +1,40 @@
+You are creating GitHub Copilot instructions for a project with these details:
+
+Project Name: {{project_name}}
+Project Type: {{project_type}}
+Programming Language: {{programming_language}}
+Project Description: {{project_prompt}}
+
+# Best Practices
+{% for practice in best_practices %}
+- {{ practice }}
+{% endfor %}
+
+# Documentation Sources
+{% for doc in documentation_sources %}
+- {{ doc }}
+{% endfor %}
+
+IMPORTANT: For any project description, you must research and expand:
+1. Research current best practices, architectures, and frameworks for this type of project
+2. Determine appropriate technologies, libraries, and tools beyond what's explicitly mentioned
+3. Establish proper project structure, design patterns, and architectural considerations
+4. Identify security, performance, and scalability requirements
+5. Define testing strategies and deployment approaches
+
+Use search capabilities to find current information about technologies and approaches.
+
+Your task is to generate specialized instructions for GitHub Copilot that will:
+
+1. Help Copilot understand the project domain and requirements in great detail
+2. Guide Copilot to follow project-specific best practices and industry standards
+3. Encourage appropriate coding patterns, architectures, and technologies that are current and well-regarded
+4. Reference relevant documentation and standards with specific links when possible
+5. Optimize code generation for this specific project context
+6. Include detailed guidance on project structure, component organization, and architectural patterns
+7. Provide security considerations, performance optimizations, and code quality standards
+8. Define testing strategies, CI/CD approaches, and deployment considerations
+
+The instructions will be placed in .github/prompts/project-prompt.md and should be
+formatted as Markdown with clear sections and comprehensive guidance. Make your
+instructions extremely detailed and actionable, even if the initial project description is minimal.

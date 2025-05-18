@@ -19,6 +19,15 @@ module "basic_template" {
   project_name   = "crm-webapp" 
   repo_org       = "example-org"
   gemini_api_key = var.gemini_api_key
+  
+  # Enable search grounding for research-based expansion of the project description
+  enable_search_grounding = true
+  
+  # Configure model parameters to ensure sufficient output tokens for comprehensive research
+  model_settings = {
+    temperature       = 0.2
+    max_output_tokens = 32768  # Maximum tokens for thorough research
+  }
 }
 
 # Output the results
