@@ -438,11 +438,14 @@ class MainContentGenerator:
 
         except Exception as e:
             logger.error(f"Error running main content agent: {str(e)}")
-            logger.error(traceback.format_exc())
+            error_msg = str(e)
+            stack_trace = traceback.format_exc()
+            logger.error(stack_trace)
             return ProjectOutput(
-                readme_content=f"# Error in Main Content Generation\n\nError: {str(e)}\n\n```\n{traceback.format_exc()}\n```",
+                readme_content=f"# Error in Main Content Generation\n\nError: {error_msg}\n\n```\n{stack_trace}\n```",
                 best_practices=[], suggested_extensions=[], documentation_source=[],
-                copilot_instructions="", project_type="Unknown", programming_language="Unknown"
+                copilot_instructions="", project_type="Unknown", programming_language="Unknown",
+                error=error_msg, stack_trace=stack_trace
             )
 
 
@@ -471,20 +474,13 @@ class CopilotInstructionsGenerator:
         self.model_name = model_name
         self.token_config = token_config
 
-        try:
-            self.copilot_instructions_template = template_env.get_template('copilot_instructions_template.j2')
-            with open(os.path.join(template_dir, "copilot_instructions_system_prompt.txt"), "r") as f:
-                self.system_prompt_str = f.read()
-            with open(os.path.join(template_dir, "copilot_content.j2"), "r") as f:
-                self.context_template_str = f.read()
+        self.copilot_instructions_template = template_env.get_template('copilot_instructions_template.j2')
+        with open(os.path.join(template_dir, "copilot_instructions_system_prompt.txt"), "r") as f:
+            self.system_prompt_str = f.read()
+        with open(os.path.join(template_dir, "copilot_content.j2"), "r") as f:
+            self.context_template_str = f.read()
 
-        except Exception as e:
-            logger.error(f"Failed to load templates for CopilotInstructionsGenerator: {e}")
-            self.copilot_instructions_template = Template("# GitHub Copilot Instructions for {{ project_name }} (Fallback)")
-            self.system_prompt_str = "Generate Copilot instructions."
-            self.context_template_str = "Project: {{ project_name }}"
-
-    def generate(self, project_output: ProjectOutput, github_project_prompt_content: str) -> str:
+    def generate(self, project_output: ProjectOutput) -> str:
         """
         Generates GitHub Copilot instructions.
 
@@ -499,7 +495,7 @@ class CopilotInstructionsGenerator:
 
         copilot_deps = CopilotAgentDeps(
             project_name=self.project_name,
-            project_prompt=self.project_prompt_text,
+            project_prompt=project_output.readme_content,
             project_type=project_output.project_type,
             programming_language=project_output.programming_language,
             best_practices=project_output.best_practices,
@@ -529,11 +525,13 @@ class CopilotInstructionsGenerator:
         try:
             logger.info("Running Copilot instructions agent...")
             result = agent.run_sync(
-                "Generate GitHub Copilot instructions for a project-prompt.md file based on the project context provided.",
+                self.context_template_str,
                 deps=copilot_deps
             )
-
+            logger.info("Copilot instructions agent completed successfully.")
+            logger.info(f"Copilot instructions agent output: {result}")
             if result and hasattr(result, 'output') and result.output:
+                logger.info("Copilot instructions agent output is valid.")
                 copilot_agent_output: CopilotPromptContent = result.output
                 template_data = {
                     "project_name": self.project_name,
@@ -779,13 +777,21 @@ class OutputFileWriter:
         error_project_output = ProjectOutput(
             readme_content=error_content_md, best_practices=[], suggested_extensions=[],
             documentation_source=[], project_type="Error", programming_language="Error",
-            copilot_instructions=f"# Error: Copilot Instructions Not Generated\n\n{error_msg}"
+            copilot_instructions=f"# Error: Copilot Instructions Not Generated\n\n{error_msg}",
+            error=error_msg,
+            stack_trace=stack_trace
         )
-        error_project_output.error = error_msg
-        error_project_output.stack_trace = stack_trace
-
+        
+        # Now we can directly use the model for JSON output
         if hasattr(self.args, 'json_output') and self.args.json_output:
-            self._write_file('json_output', json.dumps(error_project_output.model_dump(), indent=2) , "Failed to write error JSON")
+            try:
+                # The model now includes error fields
+                json_content = json.dumps(error_project_output.model_dump(), indent=2)
+                self._write_file('json_output', json_content, "Failed to write error JSON")
+            except Exception as e:
+                logger.error(f"Failed to create JSON error output: {e}")
+                # Basic fallback
+                self._write_file('json_output', json.dumps({"error": error_msg}, indent=2), "Failed to write basic error JSON")
         
         self._write_file('markdown_output', error_content_md, "Failed to write error Markdown")
         self._write_file('project_prompt_output', error_content_md, "Failed to write error to project prompt file")
@@ -882,16 +888,15 @@ class ProjectPrompt:
             self.placeholder_format, self.placeholder_vars_list
         )
 
-        if "Error in Main Content Generation" in self._project_output_data.readme_content:
+        if self._project_output_data.error or "Error in Main Content Generation" in self._project_output_data.readme_content:
             logger.error("Main content generation failed within ProjectPrompt.")
+            error_details = self._project_output_data.error or "See readme content for details"
             self._simple_project_prompt_md = f"# Error\n{self._project_output_data.readme_content}"
             self._github_project_prompt_md = f"# Error\n{self._project_output_data.readme_content}"
             self._copilot_instructions_md = f"# Error\n{self._project_output_data.readme_content}"
-            raise RuntimeError(f"Main content generation failed. Details: {self._project_output_data.readme_content}")
+            raise RuntimeError(f"Main content generation failed. Details: {error_details}")
 
-        self._simple_project_prompt_md = self.prompts_formatter.format_simple_project_prompt()
-        self._github_project_prompt_md = self.prompts_formatter.format_github_project_prompt(self._project_output_data)
-        self._copilot_instructions_md = self.copilot_generator.generate(self._project_output_data, self._github_project_prompt_md)
+        self._copilot_instructions_md = self.copilot_generator.generate(self._project_output_data)
         
         if self._project_output_data and self._copilot_instructions_md:
              self._project_output_data.copilot_instructions = self._copilot_instructions_md

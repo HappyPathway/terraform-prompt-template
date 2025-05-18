@@ -1,18 +1,3 @@
-# Project Prompt
+# Error: Failed to Generate Content
 
-
-## Best Practices
-
-No best practices provided.
-
-
-## Recommended VS Code Extensions
-
-No extensions suggested.
-
-
-## Documentation Sources
-
-No documentation sources provided.
-
-
+Content generation failed within ProjectPrompt instance.

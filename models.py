@@ -22,12 +22,14 @@ class ReadmeContent(BaseModel):
 class ProjectOutput(BaseModel):
     """Output model for project content generation"""
     readme_content: str = Field(description="Full README.md content")
-    best_practices: list[str] = Field(description="List of 5-10 best practices")
+    best_practices: list[str] = Field(description="List of 5-10 best practices") 
     suggested_extensions: list[str] = Field(description="List of recommended VS Code extensions")
     documentation_source: list[str] = Field(description="List of helpful documentation sources")
     copilot_instructions: str = Field(description="Instructions for GitHub Copilot")
     project_type: str = Field(description="The type of project")
     programming_language: str = Field(description="The primary programming language")
+    error: Optional[str] = Field(default=None, description="Error message if content generation failed")
+    stack_trace: Optional[str] = Field(default=None, description="Stack trace for error debugging")
 
 class CopilotPromptContent(BaseModel):
     """Output model for Copilot instructions generation"""
