@@ -571,7 +571,10 @@ class ProjectPrompt:
         self._initialization_success = False
         
         try:
-            self.common_tools = CommonGeminiTools(api_key=self.gemini_api_key, enable_search_grounding=self.enable_search_grounding)
+            self.common_tools = CommonGeminiTools(
+                api_key=self.gemini_api_key, 
+                enable_search_grounding=self.enable_search_grounding
+            )
             if not self.common_tools.configure_api(self.gemini_api_key):
                 raise RuntimeError("Failed to configure or connect to Gemini API.")
 
