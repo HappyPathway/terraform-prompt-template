@@ -1,0 +1,18 @@
+{
+	"folders": [
+		{
+			"path": ".",
+			"name": "gemini-prompt"
+		},
+		{
+			"path": "../gemini-stacktrace"
+		},
+		{
+			"path": "../GeminiWorkspace"
+		},
+		{
+			"path": "../gemini-update"
+		}
+	],
+	"settings": {}
+}

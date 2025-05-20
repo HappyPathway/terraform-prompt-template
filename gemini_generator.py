@@ -2,6 +2,20 @@
 """
 Gemini content generation script for terraform-github-project
 Retrieves AI-generated content using Gemini API based on project prompt and requirements
+
+Usage:
+  python gemini_generator.py --project_name "My Project" --repo_org "myorg" --project_prompt "Description" 
+    --markdown_output "output.md"
+
+Output Configuration:
+  Individual file outputs can be specified with --markdown_output, etc.
+  Alternatively, use --output_dir to write all outputs to a single directory:
+  
+  python gemini_generator.py --project_name "My Project" --repo_org "myorg" --project_prompt "Description" 
+    --output_dir "./output"
+  
+  When --output_dir is specified, the script will create the directory if it doesn't exist,
+  and all output files will be written there, preserving their original filenames.
 """
 
 import json
@@ -37,7 +51,7 @@ from google.genai.types import Tool, GenerateContentConfig, GoogleSearch
 #   ProjectPromptsFormatter:
 #     - Formats different types of project prompt files (simple and GitHub-specific).
 #   OutputFileWriter:
-#     - Handles writing all generated content and error reports to their respective files.
+#     - Handles writing the main generated content to a markdown file.
 #   ProjectPrompt:
 #     - Encapsulates the end-to-end project content generation workflow, including
 #       main content, project prompts, and Copilot instructions. It initializes and
@@ -51,8 +65,8 @@ from google.genai.types import Tool, GenerateContentConfig, GoogleSearch
 #   CopilotInstructionsGenerator.generate: Orchestrates Copilot instructions generation.
 #   ProjectPromptsFormatter.format_github_project_prompt: Formats the GitHub-specific prompt.
 #   ProjectPromptsFormatter.format_simple_project_prompt: Formats the basic project prompt.
-#   OutputFileWriter.write_all_outputs: Writes all successful output files.
-#   OutputFileWriter.write_error_outputs: Writes error information to output files.
+#   OutputFileWriter.write_markdown_output: Writes the main markdown output file.
+#   OutputFileWriter.write_error_markdown: Writes error information to the markdown file.
 #   ProjectPrompt._generate_all_content: Runs the full content generation pipeline.
 #
 # Global Variables:
@@ -449,271 +463,37 @@ class MainContentGenerator:
             )
 
 
-class CopilotInstructionsGenerator:
-    """
-    Generates GitHub Copilot instructions tailored to the project,
-    utilizing project details and previously generated content.
-    """
-    def __init__(self, common_tools: CommonGeminiTools, project_name: str, project_prompt_text: str,
-                 repo_org: str, model_name: str, token_config: Dict[str, Any]):
-        """
-        Initializes CopilotInstructionsGenerator.
-
-        Args:
-            common_tools: An instance of CommonGeminiTools.
-            project_name: The name of the project.
-            project_prompt_text: The user-provided project prompt.
-            repo_org: The GitHub organization for the repository.
-            model_name: The Gemini model to use for generating Copilot instructions.
-            token_config: Token configuration for the Gemini model.
-        """
-        self.common_tools = common_tools
-        self.project_name = project_name
-        self.project_prompt_text = project_prompt_text
-        self.repo_org = repo_org
-        self.model_name = model_name
-        self.token_config = token_config
-
-        self.copilot_instructions_template = template_env.get_template('copilot_instructions_template.j2')
-        with open(os.path.join(template_dir, "copilot_instructions_system_prompt.txt"), "r") as f:
-            self.system_prompt_str = f.read()
-        with open(os.path.join(template_dir, "copilot_content.j2"), "r") as f:
-            self.context_template_str = f.read()
-
-    def generate(self, project_output: ProjectOutput) -> str:
-        """
-        Generates GitHub Copilot instructions.
-
-        Args:
-            project_output: The ProjectOutput model containing main generated content.
-            github_project_prompt_content: The formatted GitHub project prompt string.
-
-        Returns:
-            A string containing the generated Copilot instructions in Markdown format.
-        """
-        logger.info("Generating GitHub Copilot instructions...")
-
-        copilot_deps = CopilotAgentDeps(
-            project_name=self.project_name,
-            project_prompt=project_output.readme_content,
-            project_type=project_output.project_type,
-            programming_language=project_output.programming_language,
-            best_practices=project_output.best_practices,
-            documentation_sources=project_output.documentation_source
-        )
-
-        def copilot_context_data_func(ctx: RunContext[CopilotAgentDeps]) -> Dict[str, Any]:
-            return {
-                "project_name": ctx.deps.project_name,
-                "project_prompt": ctx.deps.project_prompt,
-                "project_type": ctx.deps.project_type,
-                "programming_language": ctx.deps.programming_language,
-                "best_practices": ctx.deps.best_practices,
-                "documentation_sources": ctx.deps.documentation_sources
-            }
-
-        agent = self.common_tools.create_pydantic_agent(
-            model_name=self.model_name,
-            token_config=self.token_config,
-            deps_type=CopilotAgentDeps,
-            output_type=CopilotPromptContent,
-            system_prompt_str=self.system_prompt_str,
-            context_template_str=self.context_template_str,
-            context_data_func=copilot_context_data_func
-        )
-
-        try:
-            logger.info("Running Copilot instructions agent...")
-            result = agent.run_sync(
-                self.context_template_str,
-                deps=copilot_deps
-            )
-            logger.info("Copilot instructions agent completed successfully.")
-            logger.info(f"Copilot instructions agent output: {result}")
-            if result and hasattr(result, 'output') and result.output:
-                logger.info("Copilot instructions agent output is valid.")
-                copilot_agent_output: CopilotPromptContent = result.output
-                template_data = {
-                    "project_name": self.project_name,
-                    "github_project_prompt_content": github_project_prompt_content,
-                    "project_specific_instructions": copilot_agent_output.project_specific_instructions if hasattr(copilot_agent_output, 'project_specific_instructions') else [],
-                    "helpful_context": copilot_agent_output.helpful_context if hasattr(copilot_agent_output, 'helpful_context') else [],
-                    "best_practices": project_output.best_practices,
-                    "recommended_extensions": project_output.suggested_extensions,
-                    "documentation_sources": project_output.documentation_source,
-                    "programming_language": project_output.programming_language,
-                    "project_type": project_output.project_type
-                }
-                return self.copilot_instructions_template.render(template_data)
-            else:
-                logger.warning("Copilot instructions agent failed, using fallback.")
-                fallback_data = {
-                    "project_name": self.project_name,
-                    "github_project_prompt_content": github_project_prompt_content,
-                    "project_specific_instructions": ["Review the project prompt carefully."],
-                    "helpful_context": ["Consider the main goals of the project."],
-                    "best_practices": project_output.best_practices,
-                    "recommended_extensions": project_output.suggested_extensions,
-                    "documentation_sources": project_output.documentation_source,
-                    "programming_language": project_output.programming_language,
-                    "project_type": project_output.project_type
-                }
-                return self.copilot_instructions_template.render(fallback_data)
-
-        except Exception as e:
-            logger.error(f"Error generating Copilot instructions: {str(e)}")
-            logger.error(traceback.format_exc())
-            minimal_data = {
-                "project_name": self.project_name,
-                "github_project_prompt_content": f"# Project: {self.project_name}\nPrompt: {self.project_prompt_text}",
-                "project_specific_instructions": [],
-                "helpful_context": [],
-                "best_practices": project_output.best_practices if hasattr(project_output, 'best_practices') else [],
-                "recommended_extensions": project_output.suggested_extensions if hasattr(project_output, 'suggested_extensions') else [],
-                "documentation_sources": project_output.documentation_source if hasattr(project_output, 'documentation_source') else [],
-                "programming_language": project_output.programming_language,
-                "project_type": project_output.project_type
-            }
-            return self.copilot_instructions_template.render(minimal_data)
-
-
-class ProjectPromptsFormatter:
-    """
-    Formats project prompt content for different output files,
-    such as a simple project prompt and a more detailed GitHub project prompt.
-    """
-    def __init__(self, project_name: str, project_prompt_text: str, repo_org: str, template_file_path: Optional[str] = None):
-        """
-        Initializes ProjectPromptsFormatter.
-
-        Args:
-            project_name: The name of the project.
-            project_prompt_text: The original user-provided project prompt.
-            repo_org: The GitHub organization for the repository.
-            template_file_path: Optional path to a custom Jinja2 template file for project prompts.
-        """
-        self.project_name = project_name
-        self.project_prompt_text = project_prompt_text
-        self.repo_org = repo_org
-        
-        if template_file_path:
-            try:
-                # Attempt to load the custom template
-                # This assumes template_file_path is either an absolute path
-                # or a filename relative to one of the paths in template_env.loader.searchpath
-                if os.path.isabs(template_file_path) and os.path.exists(template_file_path):
-                    # If it's an absolute path, read it directly and create a Template object
-                    with open(template_file_path, "r", encoding="utf-8") as f:
-                        custom_template_str = f.read()
-                    self.simple_project_prompt_template = Template(custom_template_str)
-                    self.github_project_prompt_template = Template(custom_template_str) # Assuming same for both
-                    logger.info(f"Successfully loaded custom project prompt template from: {template_file_path}")
-                else:
-                    # Assume it's a filename to be found by the existing template_env
-                    template_filename = os.path.basename(template_file_path)
-                    self.simple_project_prompt_template = template_env.get_template(template_filename)
-                    self.github_project_prompt_template = template_env.get_template(template_filename)
-                    logger.info(f"Successfully loaded custom project prompt template '{template_filename}' via template environment.")
-
-            except Exception as e:
-                logger.warning(f"Failed to load custom project prompt template from '{template_file_path}': {e}. Falling back to default.")
-                self._load_default_templates()
-        else:
-            self._load_default_templates()
-
-    def _load_default_templates(self):
-        """Loads the default templates."""
-        try:
-            self.simple_project_prompt_template = template_env.get_template('project_prompt_template.j2')
-            self.github_project_prompt_template = template_env.get_template('project_prompt_template.j2') # Often the same
-            logger.info("Loaded default project prompt templates.")
-        except Exception as e:
-            logger.error(f"Failed to load default templates for ProjectPromptsFormatter: {e}")
-            # Fallback to very basic inline templates
-            self.simple_project_prompt_template = Template("# {{ project_name }} Project Prompt\n\n{{ project_prompt }}")
-            self.github_project_prompt_template = Template("# {{ project_name }} @ {{ repo_org }}\n\n{{ project_prompt }}")
-
-    def format_github_project_prompt(self, project_output: ProjectOutput) -> str:
-        """
-        Formats the project prompt specifically for use in a GitHub context,
-        incorporating details from the main project generation.
-
-        Args:
-            project_output: The ProjectOutput model from the main content generation.
-
-        Returns:
-            A string containing the formatted GitHub project prompt.
-        """
-        logger.info("Formatting GitHub project prompt content.")
-        return self.github_project_prompt_template.render(
-            project_name=self.project_name,
-            repo_org=self.repo_org,
-            project_prompt=self.project_prompt_text,
-            project_type=project_output.project_type,
-            programming_language=project_output.programming_language
-        )
-
-    def format_simple_project_prompt(self) -> str:
-        """
-        Formats a simple project prompt file using the original project name and prompt text.
-
-        Returns:
-            A string containing the formatted simple project prompt.
-        """
-        logger.info("Formatting simple project prompt file content.")
-        return self.simple_project_prompt_template.render(
-            project_name=self.project_name,
-            project_prompt=self.project_prompt_text
-        )
-
-
 class OutputFileWriter:
     """
-    Handles writing all generated content and error reports to files.
+    Handles writing the main generated content to a markdown file.
     """
     def __init__(self, args: argparse.Namespace, main_markdown_template: Template):
-        """
-        Initializes OutputFileWriter.
-
-        Args:
-            args: Parsed command-line arguments, used to determine output file paths.
-            main_markdown_template: Jinja2 template for rendering the main Markdown output.
-        """
         self.args = args
         self.main_markdown_template = main_markdown_template
 
     def _write_file(self, output_arg_key: str, content: str, error_message: str):
-        """
-        Helper method to write content to a file specified by an argument key.
-        Creates parent directories if they don't exist.
-
-        Args:
-            output_arg_key: The key in `self.args` that holds the file path (e.g., 'json_output').
-            content: The string content to write.
-            error_message: The error message to log if writing fails.
-        """
-        file_path = getattr(self.args, output_arg_key, None)
-        if not file_path:
+        original_file_path = getattr(self.args, output_arg_key, None)
+        if not original_file_path:
             logger.info(f"Output path for '{output_arg_key}' not provided. Skipping.")
             return
+        file_path = original_file_path
         try:
-            os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
+            directory = os.path.dirname(os.path.abspath(file_path))
+            try:
+                os.makedirs(directory, exist_ok=True)
+                logger.debug(f"Created or verified directory: {directory}")
+            except Exception as dir_err:
+                logger.error(f"Failed to create directory {directory}: {str(dir_err)}")
+                raise
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
-            logger.info(f"Successfully wrote to {file_path}")
+            file_size = os.path.getsize(file_path)
+            file_size_str = f"{file_size / 1024:.1f} KB" if file_size > 1024 else f"{file_size} bytes"
+            logger.info(f"Successfully wrote {file_size_str} to {file_path}")
         except Exception as e:
             logger.error(f"{error_message} for {file_path}: {str(e)}")
 
     def _convert_project_output_to_markdown(self, project_output: ProjectOutput) -> str:
-        """
-        Converts a ProjectOutput Pydantic model to a Markdown string using a template.
-
-        Args:
-            project_output: The ProjectOutput model.
-
-        Returns:
-            A Markdown formatted string.
-        """
         if hasattr(project_output, 'model_dump') and callable(getattr(project_output, 'model_dump')):
             model_dict = project_output.model_dump()
             data_for_template = {
@@ -727,76 +507,18 @@ class OutputFileWriter:
             data_for_template = {"readme_content": "Invalid project output format for Markdown."}
         return self.main_markdown_template.render(data_for_template)
 
-    def write_all_outputs(self, project_output: ProjectOutput,
-                          simple_project_prompt_md: str,
-                          github_project_prompt_md: str,
-                          copilot_instructions_md: str):
-        """
-        Writes all successfully generated content to their respective output files.
-
-        Args:
-            project_output: The main ProjectOutput model.
-            simple_project_prompt_md: Formatted content for the simple project prompt file.
-            github_project_prompt_md: Formatted content for the GitHub project prompt file.
-            copilot_instructions_md: Formatted content for the Copilot instructions file.
-        """
-        logger.info("Writing all output files...")
-
-        if hasattr(self.args, 'json_output') and self.args.json_output:
-            try:
-                json_content = json.dumps(project_output.model_dump(), indent=2)
-                self._write_file('json_output', json_content, "Failed to write JSON output")
-            except Exception as e:
-                logger.error(f"Failed to serialize ProjectOutput to JSON: {e}")
-        
+    def write_markdown_output(self, project_output: ProjectOutput):
+        logger.info("Writing main markdown output file...")
         if hasattr(self.args, 'markdown_output') and self.args.markdown_output:
             markdown_content = self._convert_project_output_to_markdown(project_output)
             self._write_file('markdown_output', markdown_content, "Failed to write Markdown output")
 
-        self._write_file('project_prompt_output', simple_project_prompt_md, "Failed to write project prompt file")
-        self._write_file('github_project_prompt_output', github_project_prompt_md, "Failed to write GitHub project prompt file")
-
-        self._write_file('copilot_instructions_output', copilot_instructions_md, "Failed to write Copilot instructions file")
-
-    def write_error_outputs(self, error_msg: str, stack_trace: Optional[str] = None):
-        """
-        Writes error information to all configured output files in case of a failure.
-
-        Args:
-            error_msg: The primary error message.
-            stack_trace: Optional string containing the stack trace.
-        """
-        logger.error(f"Writing error outputs due to: {error_msg}")
-        if stack_trace:
-            logger.error(f"Stack trace: {stack_trace}")
-
+    def write_error_markdown(self, error_msg: str, stack_trace: Optional[str] = None):
+        logger.error(f"Writing error markdown due to: {error_msg}")
         error_content_md = f"# Error: Failed to Generate Content\n\n{error_msg}"
         if stack_trace:
             error_content_md += f"\n\n## Stack Trace\n\n```\n{stack_trace}\n```"
-
-        error_project_output = ProjectOutput(
-            readme_content=error_content_md, best_practices=[], suggested_extensions=[],
-            documentation_source=[], project_type="Error", programming_language="Error",
-            copilot_instructions=f"# Error: Copilot Instructions Not Generated\n\n{error_msg}",
-            error=error_msg,
-            stack_trace=stack_trace
-        )
-        
-        # Now we can directly use the model for JSON output
-        if hasattr(self.args, 'json_output') and self.args.json_output:
-            try:
-                # The model now includes error fields
-                json_content = json.dumps(error_project_output.model_dump(), indent=2)
-                self._write_file('json_output', json_content, "Failed to write error JSON")
-            except Exception as e:
-                logger.error(f"Failed to create JSON error output: {e}")
-                # Basic fallback
-                self._write_file('json_output', json.dumps({"error": error_msg}, indent=2), "Failed to write basic error JSON")
-        
         self._write_file('markdown_output', error_content_md, "Failed to write error Markdown")
-        self._write_file('project_prompt_output', error_content_md, "Failed to write error to project prompt file")
-        self._write_file('github_project_prompt_output', error_content_md, "Failed to write error to GitHub project prompt file")
-        self._write_file('copilot_instructions_output', error_project_output.copilot_instructions, "Failed to write error to Copilot instructions file")
 
 
 class ProjectPrompt:
@@ -846,16 +568,32 @@ class ProjectPrompt:
         self.project_prompt_formatter_template_path = project_prompt_formatter_template_path
 
         self._project_output_data: Optional[ProjectOutput] = None
-        self._simple_project_prompt_md: Optional[str] = None
-        self._github_project_prompt_md: Optional[str] = None
-        self._copilot_instructions_md: Optional[str] = None
+        self._initialization_success = False
         
-        self.common_tools = CommonGeminiTools(api_key=self.gemini_api_key, enable_search_grounding=self.enable_search_grounding)
-        if not self.common_tools.configure_api(self.gemini_api_key):
-            raise RuntimeError("Failed to configure or connect to Gemini API.")
+        try:
+            self.common_tools = CommonGeminiTools(api_key=self.gemini_api_key, enable_search_grounding=self.enable_search_grounding)
+            if not self.common_tools.configure_api(self.gemini_api_key):
+                raise RuntimeError("Failed to configure or connect to Gemini API.")
 
-        self._initialize_generators()
-        self._generate_all_content()
+            self._initialize_generators()
+            self._generate_all_content()
+            self._initialization_success = True
+        except Exception as e:
+            logger.error(f"Error during ProjectPrompt initialization: {e}")
+            stack_trace = traceback.format_exc()
+            logger.error(f"Stack trace: {stack_trace}")
+            
+            # Create a minimal error output so that properties don't return None
+            error_msg = f"ProjectPrompt initialization failed: {str(e)}"
+            self._project_output_data = ProjectOutput(
+                readme_content=f"# Error\n\n{error_msg}\n\n```\n{stack_trace}\n```",
+                best_practices=[], suggested_extensions=[], documentation_source=[],
+                copilot_instructions="", project_type="Error", programming_language="Error",
+                error=error_msg, stack_trace=stack_trace
+            )
+            
+            # Re-raise the exception so the caller knows something went wrong
+            raise
 
     def _initialize_generators(self):
         base_token_config = {
@@ -873,14 +611,6 @@ class ProjectPrompt:
             self.common_tools, self.project_name, self.project_prompt_text, self.repo_org,
             self.main_gemini_model, main_content_token_config
         )
-        self.prompts_formatter = ProjectPromptsFormatter(
-            self.project_name, self.project_prompt_text, self.repo_org,
-            template_file_path=self.project_prompt_formatter_template_path
-        )
-        self.copilot_generator = CopilotInstructionsGenerator(
-            self.common_tools, self.project_name, self.project_prompt_text, self.repo_org,
-            self.copilot_gemini_model, copilot_token_config
-        )
 
     def _generate_all_content(self):
         logger.info("Starting content generation process within ProjectPrompt...")
@@ -891,31 +621,19 @@ class ProjectPrompt:
         if self._project_output_data.error or "Error in Main Content Generation" in self._project_output_data.readme_content:
             logger.error("Main content generation failed within ProjectPrompt.")
             error_details = self._project_output_data.error or "See readme content for details"
-            self._simple_project_prompt_md = f"# Error\n{self._project_output_data.readme_content}"
-            self._github_project_prompt_md = f"# Error\n{self._project_output_data.readme_content}"
-            self._copilot_instructions_md = f"# Error\n{self._project_output_data.readme_content}"
             raise RuntimeError(f"Main content generation failed. Details: {error_details}")
 
-        self._copilot_instructions_md = self.copilot_generator.generate(self._project_output_data)
-        
-        if self._project_output_data and self._copilot_instructions_md:
-             self._project_output_data.copilot_instructions = self._copilot_instructions_md
-
+    @property
+    def initialization_success(self) -> bool:
+        """Returns whether initialization completed successfully without errors."""
+        return self._initialization_success
+    
     @property
     def project_output_data(self) -> Optional[ProjectOutput]:
+        """Returns the generated project output data or an error-filled object if initialization failed."""
+        if not self._initialization_success:
+            logger.warning("Accessing project_output_data after failed initialization.")
         return self._project_output_data
-
-    @property
-    def simple_project_prompt_content(self) -> Optional[str]:
-        return self._simple_project_prompt_md
-
-    @property
-    def github_project_prompt_content(self) -> Optional[str]:
-        return self._github_project_prompt_md
-
-    @property
-    def copilot_instructions_content(self) -> Optional[str]:
-        return self._copilot_instructions_md
 
 
 def main():
@@ -925,11 +643,7 @@ def main():
     parser.add_argument('--project_name', required=True, help='Project name')
     parser.add_argument('--gemini_model', default='gemini-1.5-pro-latest', help='Main Gemini model for content generation')
     parser.add_argument('--copilot_gemini_model', default='gemini-1.5-flash-latest', help='Gemini model for Copilot instructions')
-    parser.add_argument('--json_output', required=True, help='Path for the output JSON file')
     parser.add_argument('--markdown_output', required=True, help='Path for the output Markdown file')
-    parser.add_argument('--project_prompt_output', required=False, help='Path for the simple project prompt markdown file')
-    parser.add_argument('--copilot_instructions_output', required=False, help='Path for the copilot instructions markdown file')
-    parser.add_argument('--github_project_prompt_output', required=False, help='Path for the GitHub project prompt markdown file')
     parser.add_argument('--enable_search_grounding', type=str, default='true', help='Enable search grounding for supported models')
     parser.add_argument('--placeholder_format', default='${%s}', help='Placeholder format string')
     parser.add_argument('--placeholder_vars', default='project_name,repo_org,project_type,programming_language', 
@@ -942,8 +656,24 @@ def main():
         help='Path to the project prompt template file', 
         default=os.path.join(template_dir, "project_prompt_template.j2"))
     parser.add_argument('--max_output_tokens', type=int, help='Max output tokens (overrides defaults)')
-    
+    parser.add_argument('--output_dir', 
+        type=str, 
+        help='Path to a directory where all output files will be saved. If specified, overrides individual file paths.')
+    parser.add_argument('--preserve_relative_paths',
+        action='store_true',
+        help="When used with --output_dir, preserves relative path structure even for paths with parent directories"
+    )
     args = parser.parse_args()
+
+    if args.output_dir:
+        try:
+            expanded_output_dir = os.path.expandvars(os.path.expanduser(args.output_dir))
+            args.output_dir = expanded_output_dir
+            os.makedirs(args.output_dir, exist_ok=True)
+            logger.info(f"Output directory set to: {args.output_dir}")
+        except Exception as e:
+            logger.error(f"Failed to create output directory {args.output_dir}: {e}")
+            sys.exit(1)
 
     main_markdown_template_content = ""
     try:
@@ -959,7 +689,7 @@ def main():
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             logger.error("GEMINI_API_KEY environment variable not set.")
-            output_writer.write_error_outputs("GEMINI_API_KEY not set.")
+            output_writer.write_error_markdown("GEMINI_API_KEY not set.")
             sys.exit(1)
 
         token_config_overrides = {}
@@ -984,31 +714,22 @@ def main():
             project_prompt_formatter_template_path=args.project_prompt_template
         )
 
-        project_output = project_prompt_instance.project_output_data
-        simple_prompt_md = project_prompt_instance.simple_project_prompt_content
-        github_prompt_md = project_prompt_instance.github_project_prompt_content
-        copilot_instructions_md = project_prompt_instance.copilot_instructions_content
-
-        if not project_output or not simple_prompt_md or not github_prompt_md:
-            err_msg = "Content generation failed within ProjectPrompt instance."
-            if project_output and hasattr(project_output, 'readme_content') and "Error in Main Content Generation" in project_output.readme_content:
-                err_msg = f"Main content generation failed. Details: {project_output.readme_content}"
-            
-            output_writer.write_error_outputs(
+        if not project_prompt_instance.initialization_success:
+            err_msg = "Content generation failed during initialization."
+            project_output = project_prompt_instance.project_output_data
+            output_writer.write_error_markdown(
                 err_msg,
-                project_output.stack_trace if hasattr(project_output, 'stack_trace') else None
+                project_output.stack_trace if project_output and hasattr(project_output, 'stack_trace') else None
             )
             sys.exit(1)
+            
+        project_output = project_prompt_instance.project_output_data
+        if not project_output or project_output.error:
+            error_msg = project_output.error if project_output and hasattr(project_output, 'error') else "Unknown error."
+            output_writer.write_error_markdown(error_msg, getattr(project_output, 'stack_trace', None))
+            sys.exit(1)
 
-        if not (hasattr(args, 'copilot_instructions_output') and args.copilot_instructions_output):
-            logger.info("Copilot instructions output file not specified, generated content will not be written to its dedicated file but may be part of main output.")
-            if copilot_instructions_md is None:
-                copilot_instructions_md = ""
-
-        output_writer.write_all_outputs(
-            project_output, simple_prompt_md, github_prompt_md, copilot_instructions_md
-        )
-
+        output_writer.write_markdown_output(project_output)
         logger.info("Content generation and file writing completed successfully.")
         sys.exit(0)
 
@@ -1017,7 +738,7 @@ def main():
         error_msg = f"Unhandled exception in main: {str(e)}"
         logger.error(error_msg)
         logger.error(f"Stack trace: {stack_trace}")
-        output_writer.write_error_outputs(error_msg, stack_trace)
+        output_writer.write_error_markdown(error_msg, stack_trace)
         sys.exit(1)
 
 if __name__ == "__main__":
