@@ -10,15 +10,6 @@
 No best practices provided.
 {% endif %}
 
-## Recommended VS Code Extensions
-{% if suggested_extensions %}
-{% for extension in suggested_extensions %}
-- {{ extension }}
-{% endfor %}
-{% else %}
-No extensions suggested.
-{% endif %}
-
 ## Documentation Sources
 {% if documentation_source %}
 {% for doc in documentation_source %}
@@ -26,9 +17,4 @@ No extensions suggested.
 {% endfor %}
 {% else %}
 No documentation sources provided.
-{% endif %}
-
-{% if copilot_instructions %}
-## GitHub Copilot Instructions
-{{ copilot_instructions }}
 {% endif %}

@@ -1,0 +1,315 @@
+#!/usr/bin/env python3
+# filepath: /Users/darnold/bin/gemini_interactive.py
+import argparse
+import os
+import subprocess
+import sys
+import shutil
+
+def find_vscode():
+    """Find VS Code or VS Code Insiders executable in the system."""
+    # Check for specific editors in this order of preference
+    for editor in ["code", "code-insiders"]:
+        if shutil.which(editor):
+            return editor
+    
+    # Fall back to environment variable or nano if VS Code isn't found
+    return os.environ.get('EDITOR', 'vim')
+
+def check_gh_cli():
+    """Check if GitHub CLI is installed and authenticated."""
+    if not shutil.which("gh"):
+        print("GitHub CLI (gh) is not installed. Please install it to use GitHub integration features.")
+        print("Installation instructions: https://github.com/cli/cli#installation")
+        return False
+
+    # Check if user is authenticated with GitHub
+    try:
+        result = subprocess.run(["gh", "auth", "status"], 
+                               stdout=subprocess.PIPE, 
+                               stderr=subprocess.PIPE, 
+                               text=True, 
+                               check=False)
+        return result.returncode == 0
+    except Exception:
+        return False
+
+def create_github_repo(repo_name, org_name, description=None, is_private=False):
+    """Create a GitHub repository using the GitHub CLI.
+    
+    Args:
+        repo_name: Name of the repository to create
+        org_name: Organization to create the repository in
+        description: Description of the repository
+        is_private: Whether the repository should be private
+        
+    Returns:
+        Tuple of (success, message)
+    """
+    try:
+        cmd = ["gh", "repo", "create", 
+               f"{org_name}/{repo_name}"]
+        
+        if description:
+            cmd.extend(["--description", description])
+        
+        if is_private:
+            cmd.append("--private")
+        else:
+            cmd.append("--public")
+        
+        cmd.append("--confirm")
+        
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False
+        )
+        
+        if result.returncode == 0:
+            return True, f"https://github.com/{org_name}/{repo_name}"
+        else:
+            return False, result.stderr.strip()
+    except Exception as e:
+        return False, str(e)
+
+def upload_to_github(repo_name, org_name, file_path, github_path, commit_message):
+    """Upload a file to a GitHub repository.
+    
+    Args:
+        repo_name: Name of the repository
+        org_name: Organization of the repository
+        file_path: Local path to the file
+        github_path: Path in the repository
+        commit_message: Commit message
+        
+    Returns:
+        Tuple of (success, message)
+    """
+    try:
+        # Ensure the directory exists in the remote repository
+        github_dir = os.path.dirname(github_path)
+        if github_dir:
+            # Create the directory if it doesn't exist (ignoring errors)
+            mkdir_cmd = [
+                "gh", "api", 
+                f"repos/{org_name}/{repo_name}/contents/{github_dir}",
+                "--method", "PUT",
+                "-f", f"message=Create directory {github_dir}",
+                "-f", "content=" # Empty content for directory
+            ]
+            # Ignore the result, since it might already exist
+            subprocess.run(mkdir_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        
+        # Read the file content
+        with open(file_path, 'r') as f:
+            content = f.read()
+        
+        # Upload the file
+        cmd = [
+            "gh", "api",
+            f"repos/{org_name}/{repo_name}/contents/{github_path}",
+            "--method", "PUT",
+            "-f", f"message={commit_message}",
+            "-f", f"content={content}"
+        ]
+        
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False
+        )
+        
+        if result.returncode == 0:
+            return True, "File uploaded successfully"
+        else:
+            return False, result.stderr.strip()
+    except Exception as e:
+        return False, str(e)
+
+def main():
+    output_dir = os.path.join(os.getcwd(), "prompts")
+    parser = argparse.ArgumentParser(description="Run Gemini generator with an interactive prompt editor")
+    parser.add_argument("--project", dest="project_name", default="smart-wise", help="Project name for generation")
+    parser.add_argument("--repo_org", default="HappyPathway", help="Repository organization")
+    parser.add_argument("--editor", help="Override editor (e.g., code, code-insiders, vim)")
+    parser.add_argument("--gemini_model", default="gemini-2.5-pro-preview-05-06", 
+                        help="Gemini model to use")
+    parser.add_argument("--output_dir", 
+        help=f"Output directory (defaults to {output_dir})",
+        default=output_dir)
+    parser.add_argument("--max_output_tokens", type=int, default=8000,
+                        help="Maximum number of output tokens for Gemini generation")
+    parser.add_argument("--system", 
+                        help="Path to a custom system prompt template file")
+    parser.add_argument("--context",
+                        help="Path to a custom context template file")
+    
+    # GitHub integration options
+    parser.add_argument("--create-github-repo", action="store_true", help="Create a GitHub repository for the project")
+    parser.add_argument("--github-description", help="Description for the GitHub repository")
+    parser.add_argument("--github-private", action="store_true", help="Make the GitHub repository private")
+    args = parser.parse_args()
+
+    # Determine output directory
+    output_dir = args.output_dir
+    
+    # Define prompts directory and ensure it exists
+    prompts_dir = os.path.join(os.getcwd(), "prompts")
+    os.makedirs(prompts_dir, exist_ok=True)
+    
+    prompt_file_path = os.path.join(prompts_dir, f"{args.project_name}.seed")
+    
+    # Check GitHub CLI if GitHub integration is requested
+    if args.create_github_repo and not check_gh_cli():
+        print("GitHub integration is unavailable. Continuing without GitHub features.")
+        args.create_github_repo = False
+
+    # Find the appropriate editor
+    editor = args.editor if args.editor else find_vscode()
+    editor_args = []
+    
+    # Add --wait flag for VS Code variants to block until the file is closed
+    if editor in ["code", "code-insiders"]:
+        editor_args.append("--wait")
+    
+    # Check if the prompt file exists and is empty, if so, write header
+    if not os.path.exists(prompt_file_path) or os.path.getsize(prompt_file_path) == 0:
+        with open(prompt_file_path, "w") as pf:
+            pf.write(f"# Project Prompt: {args.project_name}\n\n")
+            pf.write("Enter your project prompt below. Save and close when done.\n\n")
+            # You can add a template or starter content here if desired
+            # pf.write("Develop a ")
+        
+    try:
+        # Open the editor with the persistent prompt file
+        print(f"Opening {editor} to edit your prompt at {prompt_file_path}...")
+        editor_command = [editor] + editor_args + [prompt_file_path]
+        subprocess.run(editor_command, check=True)
+        
+        # Read the edited content
+        with open(prompt_file_path, "r") as f:
+            content = f.read()
+            
+        # Remove the header lines and any leading/trailing whitespace
+        prompt_lines = content.split('\n')
+        filtered_lines = [line for line in prompt_lines if not (
+            line.startswith("# Project Prompt:") or 
+            line == "Enter your project prompt below. Save and close when done."
+        )]
+        project_prompt = '\n'.join(filtered_lines).strip()
+        
+        if not project_prompt:
+            print("Error: Empty prompt. Please provide content for the prompt.")
+            sys.exit(1)
+            
+        # Construct and run the gemini_generator.py command
+        
+        # Define the path to the virtual environment's Python interpreter
+        venv_python_executable = "/Users/darnold/git/terraform-prompt-template/.venv/bin/python"
+        gemini_script = "/Users/darnold/git/terraform-prompt-template/gemini_generator.py"
+        
+        # Ensure the output directory exists
+        os.makedirs(output_dir, exist_ok=True)
+        
+        command = [
+            venv_python_executable, # Use the virtualenv's Python
+            gemini_script,
+            "--project_prompt", project_prompt,
+            "--repo_org", args.repo_org,
+            "--project_name", args.project_name,
+            "--gemini_model", args.gemini_model,
+            "--enable_search_grounding", "true",
+            "--placeholder_format", "{{%s}}",
+            "--placeholder_vars", "project_name,repo_org,project_type,programming_language",
+            "--temperature", args.temperature if args.temperature else "0.2",
+            "--top_p", args.top_p if args.top_p else "0.95",
+            "--top_k", args.top_k if args.top_k else "40",
+            "--max_output_tokens", str(args.max_output_tokens),
+            "--output_dir", output_dir,
+            "--markdown_output", os.path.join(output_dir, f"{args.project_name}.md"),
+        ]
+
+        if args.system_prompt_template:
+            command.extend([
+                "--system_prompt_template_path", args.system
+            ])
+
+        if args.context_template:
+            command.extend([
+                "--context_template_path", args.context
+            ])
+        
+        # Add optional template file arguments if provided
+        if args.system_prompt_template:
+            command.extend(["--system_prompt_template", args.system_prompt_template])
+        if args.context_template:
+            command.extend(["--context_template", args.context_template])
+
+        print("\nRunning Gemini generator with your prompt...\n")
+        subprocess.run(command, check=True)
+        print(f"\nGeneration complete! Output saved to {output_dir}")
+        
+        # Handle GitHub repository creation and file upload if requested
+        if args.create_github_repo:
+            print("\nCreating GitHub repository...")
+            repo_name = f"{args.project_name}"
+            success, result = create_github_repo(
+                repo_name=repo_name,
+                org_name=args.repo_org,
+                description=args.github_description or f"Generated project: {args.project_name}",
+                is_private=args.github_private
+            )
+            
+            if success:
+                print(f"Repository created successfully: {result}")
+                
+                # Upload the prompt file to GitHub
+                print("\nUploading prompt file to GitHub repository...")
+                github_prompt_path = ".github/prompts"
+                success, result = upload_to_github(
+                    repo_name=repo_name,
+                    org_name=args.repo_org,
+                    file_path=prompt_file_path,
+                    github_path=f"{github_prompt_path}/{args.project_name}.prompt",
+                    commit_message=f"Add prompt file for {args.project_name}"
+                )
+                
+                if success:
+                    print(f"Prompt file uploaded successfully")
+                else:
+                    print(f"Failed to upload prompt file: {result}")
+                    
+                # Upload the markdown output to GitHub if it exists
+                markdown_file = os.path.join(output_dir, f"{args.project_name}.md")
+                if os.path.exists(markdown_file):
+                    print("\nUploading markdown output to GitHub repository...")
+                    success, result = upload_to_github(
+                        repo_name=repo_name,
+                        org_name=args.repo_org,
+                        file_path=markdown_file,
+                        github_path=f"docs/{args.project_name}.md",
+                        commit_message=f"Add markdown output for {args.project_name}"
+                    )
+                    
+                    if success:
+                        print(f"Markdown file uploaded successfully")
+                    else:
+                        print(f"Failed to upload markdown file: {result}")
+            else:
+                print(f"Failed to create repository: {result}")
+        
+    except subprocess.SubprocessError as e:
+        print(f"Error during execution: {e}", file=sys.stderr)
+        sys.exit(1)
+    finally:
+        # The prompt file is persistent, so we don't delete it.
+        # If temporary file cleanup was needed for other reasons, it would go here.
+        pass
+
+if __name__ == "__main__":
+    main()

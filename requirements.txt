@@ -1,12 +1,10 @@
 # Required core dependencies
 google-generativeai>=0.8.5  # For Gemini API with Search grounding support
-pydantic>=2.0.0,<3.0.0             # For data validation and settings management
-pydantic-ai>=0.1.0,<0.2.0          # For integration with generative AI
+pydantic             # For data validation and settings management
 requests>=2.31.0,<3.0.0            # For HTTP requests (GitHub API)
 
 # Helper libraries
 typing-extensions>=4.5.0,<5.0.0    # For enhanced type annotations
-urllib3>=1.26.18,<2.0.0            # HTTP client (used by requests)
 certifi>=2025.4.26                 # Required for secure HTTP requests
 
 # Generated application dependencies (maintain if needed)
@@ -87,3 +85,4 @@ wcwidth==0.2.13
 websockets==15.0.1
 wrapt==1.17.2
 zipp==3.21.0
+jinja2
